@@ -117,9 +117,8 @@ def create_vendor(vendor: VendorCreate, db: Session = Depends(get_db), current_u
     if existing:
         raise HTTPException(status_code=400, detail="Vendor with this GSTIN already exists")
 
-    existing_pan = db.query(Vendor).filter(Vendor.personal_pan == vendor.personal_pan).first()
-    if existing_pan:
-        raise HTTPException(status_code=400, detail="Vendor with this PAN already exists")
+    # NOTE: PAN duplicate check REMOVED — one PAN can have multiple GSTINs (state-level registrations)
+    # GSTIN is the unique identifier, not PAN.
 
     existing_aadhaar = db.query(Vendor).filter(Vendor.personal_aadhaar == vendor.personal_aadhaar).first()
     if existing_aadhaar:
@@ -282,8 +281,7 @@ def quick_register_vendor(
     # ── Duplicate checks ──
     if db.query(Vendor).filter(Vendor.gstin == gstin_upper).first():
         raise HTTPException(status_code=400, detail="Vendor with this GSTIN already exists")
-    if db.query(Vendor).filter(Vendor.personal_pan == pan_upper).first():
-        raise HTTPException(status_code=400, detail="Vendor with this PAN already exists")
+    # NOTE: PAN duplicate check REMOVED — one PAN can have multiple GSTINs (state-level registrations)
     if db.query(Vendor).filter(Vendor.personal_aadhaar == aadhaar_input).first():
         raise HTTPException(status_code=400, detail="Vendor with this Aadhaar already exists")
     # Generate unique vendor phone (Vendor model has unique constraint)

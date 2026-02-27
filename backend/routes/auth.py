@@ -237,10 +237,8 @@ def _auto_create_vendor(db: Session, user: User, setup_data: dict) -> Optional[i
         # Verify PAN via Sandbox.co.in (graceful if credits exhausted)
         verify_pan(pan_upper, name=name_input.upper())
 
-        # Duplicate checks
+        # Duplicate checks (GSTIN is the unique key, not PAN — one PAN can have multiple GSTINs)
         if db.query(Vendor).filter(Vendor.gstin == gstin_upper).first():
-            return None
-        if db.query(Vendor).filter(Vendor.personal_pan == pan_upper).first():
             return None
         # Generate unique vendor phone (Vendor model has unique constraint)
         vendor_phone = user.phone or "0000000000"
@@ -360,6 +358,11 @@ def _auto_create_vendor(db: Session, user: User, setup_data: dict) -> Optional[i
     except Exception as exc:
         import traceback
         traceback.print_exc()
+        # Rollback any partial DB changes so the session stays clean
+        try:
+            db.rollback()
+        except Exception:
+            pass
         return None
 
 
@@ -369,11 +372,100 @@ def _auto_create_vendor(db: Session, user: User, setup_data: dict) -> Optional[i
 
 @router.post("/register", status_code=201)
 def register(data: RegisterRequest, db: Session = Depends(get_db)):
-    """Register a new user account. Sends OTP for verification."""
+    """Register a new user account with real-time data validation.
+
+    For vendors, validates PAN/GSTIN/Aadhaar formats AND cross-checks
+    GSTIN against Sandbox.co.in GST Search API before accepting.
+    """
+    import re
+
     # Check duplicate email
     existing = db.query(User).filter(User.email == data.email).first()
     if existing:
         raise HTTPException(status_code=400, detail="Email already registered")
+
+    # ══════════════════════════════════════════════
+    #  VENDOR DATA VALIDATION (real-time cross-check)
+    # ══════════════════════════════════════════════
+    if data.role == "vendor":
+        if not data.pan_number or not data.aadhaar_number or not data.gstin:
+            raise HTTPException(status_code=400, detail="PAN, Aadhaar and GSTIN are required for vendor registration")
+
+        pan_upper = data.pan_number.strip().upper()
+        aadhaar_input = data.aadhaar_number.strip()
+        gstin_upper = data.gstin.strip().upper()
+
+        # ── 1. PAN format validation ──
+        pan_pattern = r"^[A-Z]{5}[0-9]{4}[A-Z]$"
+        if not re.match(pan_pattern, pan_upper):
+            raise HTTPException(
+                status_code=422,
+                detail=f"Invalid PAN format '{pan_upper}'. Must be 10 characters: 5 letters + 4 digits + 1 letter (e.g. ABCDE1234F)"
+            )
+
+        # ── 2. Aadhaar format validation ──
+        if len(aadhaar_input) != 12 or not aadhaar_input.isdigit():
+            raise HTTPException(
+                status_code=422,
+                detail="Invalid Aadhaar format. Must be exactly 12 digits."
+            )
+        if aadhaar_input[0] == "0":
+            raise HTTPException(
+                status_code=422,
+                detail="Invalid Aadhaar number — cannot start with 0."
+            )
+
+        # ── 3. GSTIN format validation ──
+        gstin_pattern = r"^\d{2}[A-Z]{5}\d{4}[A-Z][A-Z\d]Z[A-Z\d]$"
+        if not re.match(gstin_pattern, gstin_upper):
+            raise HTTPException(
+                status_code=422,
+                detail=f"Invalid GSTIN format '{gstin_upper}'. Must be 15 characters (e.g. 27ABCDE1234F1Z5)"
+            )
+
+        # ── 4. PAN ↔ GSTIN cross-check (PAN is embedded in GSTIN at positions 2-12) ──
+        gstin_pan = gstin_upper[2:12]
+        if gstin_pan != pan_upper:
+            raise HTTPException(
+                status_code=422,
+                detail=f"PAN '{pan_upper}' does not match the PAN in GSTIN '{gstin_upper}' (expected '{gstin_pan}'). PAN and GSTIN must belong to the same entity."
+            )
+
+        # ── 5. GSTIN duplicate check ──
+        existing_gstin_vendor = db.query(Vendor).filter(Vendor.gstin == gstin_upper).first()
+        if existing_gstin_vendor:
+            raise HTTPException(
+                status_code=400,
+                detail=f"A vendor with GSTIN {gstin_upper} already exists in the system."
+            )
+
+        # ── 6. LIVE GSTIN verification via Sandbox.co.in GST Search API ──
+        try:
+            from services.sandbox_client import search_gstin
+            gst_result = search_gstin(gstin_upper)
+            if not gst_result["success"]:
+                raise HTTPException(
+                    status_code=422,
+                    detail=f"GSTIN verification failed: {gst_result.get('error', 'GSTIN not found on GST portal')}. Please enter a valid, active GSTIN."
+                )
+            gst_data = gst_result["data"]
+            gst_status = gst_data.get("status", "Unknown").lower()
+            if gst_status not in ("active",):
+                raise HTTPException(
+                    status_code=422,
+                    detail=f"GSTIN {gstin_upper} status is '{gst_data.get('status', 'Unknown')}'. Only Active GSTINs are accepted."
+                )
+            print(f"  ✅ GSTIN {gstin_upper} verified: {gst_data.get('legal_name', 'N/A')} — Active on GST portal")
+        except HTTPException:
+            raise  # Re-raise our own exceptions
+        except Exception as exc:
+            # If Sandbox API is down, log warning but allow registration to proceed
+            print(f"  ⚠️ Sandbox GST API error during registration: {exc}")
+
+        # Override with validated values
+        data.pan_number = pan_upper
+        data.aadhaar_number = aadhaar_input
+        data.gstin = gstin_upper
 
     # Hash password
     password_hash = _hash_password(data.password)

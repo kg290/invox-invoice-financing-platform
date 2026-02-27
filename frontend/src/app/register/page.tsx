@@ -36,6 +36,25 @@ export default function RegisterPage() {
       if (!form.pan_number || !form.aadhaar_number || !form.gstin) {
         toast.error("PAN, Aadhaar and GSTIN are required for vendor registration"); return;
       }
+      // PAN format: 5 letters + 4 digits + 1 letter
+      const panRegex = /^[A-Z]{5}[0-9]{4}[A-Z]$/;
+      if (!panRegex.test(form.pan_number.toUpperCase())) {
+        toast.error("Invalid PAN format. Must be 10 characters like ABCDE1234F"); return;
+      }
+      // Aadhaar: exactly 12 digits, not starting with 0
+      if (!/^\d{12}$/.test(form.aadhaar_number) || form.aadhaar_number[0] === "0") {
+        toast.error("Invalid Aadhaar. Must be exactly 12 digits and cannot start with 0"); return;
+      }
+      // GSTIN: 2 digits + 5 letters + 4 digits + 1 letter + 1 alphanumeric + Z + 1 alphanumeric
+      const gstinRegex = /^\d{2}[A-Z]{5}\d{4}[A-Z][A-Z0-9]Z[A-Z0-9]$/;
+      if (!gstinRegex.test(form.gstin.toUpperCase())) {
+        toast.error("Invalid GSTIN format. Must be 15 characters like 27ABCDE1234F1Z5"); return;
+      }
+      // Cross-check: PAN embedded in GSTIN (positions 2-12) must match PAN
+      const gstinPan = form.gstin.toUpperCase().substring(2, 12);
+      if (gstinPan !== form.pan_number.toUpperCase()) {
+        toast.error(`PAN '${form.pan_number.toUpperCase()}' does not match the PAN in GSTIN (${gstinPan}). They must belong to the same entity.`); return;
+      }
     }
     setLoading(true);
     try {

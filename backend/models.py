@@ -92,7 +92,7 @@ class Vendor(Base):
     date_of_birth = Column(String(10), nullable=False)  # YYYY-MM-DD
     phone = Column(String(15), nullable=False, unique=True)
     email = Column(String(255), nullable=False, unique=True)
-    personal_pan = Column(String(10), nullable=False, unique=True)
+    personal_pan = Column(String(10), nullable=False, index=True)  # NOT unique — one PAN can have multiple GSTINs (state-level)
     personal_aadhaar = Column(String(12), nullable=False, unique=True)
     address = Column(Text, nullable=False)
     city = Column(String(100), nullable=False)
