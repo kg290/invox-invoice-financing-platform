@@ -5,6 +5,7 @@ const api = axios.create({
   headers: {
     "Content-Type": "application/json",
   },
+  timeout: 120000, // 120 seconds — vendor registration hits Sandbox APIs during verify-otp
 });
 
 // ── Request interceptor: always attach token from localStorage ──

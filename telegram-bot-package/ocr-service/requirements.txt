@@ -1,0 +1,19 @@
+# InvoX OCR Service — Dependencies
+fastapi==0.115.0
+uvicorn[standard]==0.30.6
+python-multipart==0.0.17
+
+# OCR & Image Processing (Google Cloud Vision)
+google-cloud-vision>=3.7.0
+opencv-python-headless==4.10.0.84
+Pillow==11.0.0
+pdf2image==1.17.0
+
+# Redis Pub/Sub
+redis==5.2.1
+
+# HTTP client for calling invoice-service
+httpx==0.28.1
+
+# Utilities
+python-dateutil==2.9.0

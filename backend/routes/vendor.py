@@ -24,78 +24,82 @@ def calculate_risk_score(vendor_data: dict) -> float:
     Basic risk scoring based on vendor profile data.
     Score ranges from 0 (high risk) to 100 (low risk).
     """
-    score = 0.0
-    max_score = 100.0
+    breakdown = calculate_risk_score_breakdown(vendor_data)
+    return round(sum(f["score"] for f in breakdown["factors"]), 2)
+
+
+def calculate_risk_score_breakdown(vendor_data: dict) -> dict:
+    """
+    Detailed risk score breakdown with per-factor scores, tips, and max values.
+    """
+    factors = []
 
     # CIBIL Score (max 30 points)
     cibil = vendor_data.get("cibil_score", 300)
-    if cibil >= 750:
-        score += 30
-    elif cibil >= 650:
-        score += 20
-    elif cibil >= 550:
-        score += 10
-    else:
-        score += 0
+    cibil_score = 30 if cibil >= 750 else 20 if cibil >= 650 else 10 if cibil >= 550 else 0
+    cibil_tip = None
+    if cibil < 750:
+        cibil_tip = "Pay all EMIs & credit card bills on time. Keep credit utilization below 30%. Avoid multiple loan inquiries."
+    factors.append({"key": "cibil", "label": "CIBIL Score", "score": cibil_score, "max": 30, "value": str(cibil), "tip": cibil_tip})
 
     # GST Compliance (max 20 points)
     compliance = vendor_data.get("gst_compliance_status", "Irregular")
-    if compliance == "Regular":
-        score += 20
-    elif compliance == "Irregular":
-        score += 5
-    else:
-        score += 0
+    gst_score = 20 if compliance == "Regular" else 5 if compliance == "Irregular" else 0
+    gst_tip = None
+    if compliance != "Regular":
+        gst_tip = "File all pending GST returns on time. Resolve any compliance notices to achieve 'Regular' status."
+    factors.append({"key": "gst_compliance", "label": "GST Compliance", "score": gst_score, "max": 20, "value": compliance, "tip": gst_tip})
 
     # GST Filing History (max 15 points)
     filings = vendor_data.get("total_gst_filings", 0)
-    if filings >= 24:
-        score += 15
-    elif filings >= 12:
-        score += 10
-    elif filings >= 6:
-        score += 5
-    else:
-        score += 2
+    filing_score = 15 if filings >= 24 else 10 if filings >= 12 else 5 if filings >= 6 else 2
+    filing_tip = None
+    if filings < 24:
+        filing_tip = f"You have {filings} GST filings. Consistent monthly/quarterly filing for 24+ periods boosts your score to maximum."
+    factors.append({"key": "gst_filings", "label": "GST Filing History", "score": filing_score, "max": 15, "value": f"{filings} filings", "tip": filing_tip})
 
     # Business Age (max 15 points)
     year_est = vendor_data.get("year_of_establishment", 2026)
     age = 2026 - year_est
-    if age >= 10:
-        score += 15
-    elif age >= 5:
-        score += 10
-    elif age >= 2:
-        score += 5
-    else:
-        score += 2
+    age_score = 15 if age >= 10 else 10 if age >= 5 else 5 if age >= 2 else 2
+    age_tip = None
+    if age < 5:
+        age_tip = "Business age improves naturally over time. Maintain consistent operations and filing history."
+    factors.append({"key": "business_age", "label": "Business Age", "score": age_score, "max": 15, "value": f"{age} years", "tip": age_tip})
 
     # Annual Turnover vs Liabilities (max 10 points)
     turnover = vendor_data.get("annual_turnover", 0)
     liabilities = vendor_data.get("existing_liabilities", 0) or 0
     if turnover > 0:
         ratio = liabilities / turnover
-        if ratio < 0.3:
-            score += 10
-        elif ratio < 0.5:
-            score += 7
-        elif ratio < 0.8:
-            score += 3
-        else:
-            score += 0
+        dt_score = 10 if ratio < 0.3 else 7 if ratio < 0.5 else 3 if ratio < 0.8 else 0
+    else:
+        ratio = 0
+        dt_score = 0
+    dt_tip = None
+    if dt_score < 10:
+        dt_tip = "Reduce outstanding liabilities or increase annual turnover. Keep debt-to-turnover ratio below 30% for maximum score."
+    factors.append({"key": "debt_ratio", "label": "Debt-to-Turnover", "score": dt_score, "max": 10, "value": f"{(ratio * 100):.0f}%", "tip": dt_tip})
 
     # Business Assets (max 10 points)
     assets = vendor_data.get("business_assets_value", 0)
-    if assets >= 5000000:
-        score += 10
-    elif assets >= 1000000:
-        score += 7
-    elif assets >= 500000:
-        score += 4
-    else:
-        score += 1
+    asset_score = 10 if assets >= 5000000 else 7 if assets >= 1000000 else 4 if assets >= 500000 else 1
+    asset_tip = None
+    if assets < 1000000:
+        asset_tip = "Declare and document all business assets (equipment, inventory, property). Assets above ₹10L significantly improve this factor."
+    factors.append({"key": "assets", "label": "Business Assets", "score": asset_score, "max": 10, "value": f"₹{assets:,.0f}", "tip": asset_tip})
 
-    return round(score, 2)
+    total = round(sum(f["score"] for f in factors), 2)
+    max_total = sum(f["max"] for f in factors)
+    tips_with_impact = [f for f in factors if f["tip"] is not None]
+    tips_with_impact.sort(key=lambda f: f["max"] - f["score"], reverse=True)
+
+    return {
+        "total_score": total,
+        "max_score": max_total,
+        "factors": factors,
+        "top_tips": [{"factor": t["label"], "tip": t["tip"], "potential_gain": t["max"] - t["score"]} for t in tips_with_impact[:3]],
+    }
 
 
 @router.post("/", response_model=VendorDetailResponse, status_code=201)

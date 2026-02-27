@@ -20,6 +20,7 @@ from models import User
 from services.ai_negotiator import (
     start_chat, process_offer, get_chat,
     get_listing_negotiations, get_vendor_negotiations, get_lender_negotiations,
+    lock_price_accept,
 )
 from routes.auth import get_current_user
 
@@ -64,6 +65,27 @@ def send_offer(
             db, session_id, current_user,
             payload.rate, payload.amount, payload.message or "",
         )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+# ─── Lock price — accept listed price without negotiation ───
+class LockPricePayload(BaseModel):
+    amount: float = Field(..., gt=0, description="Investment amount (₹)")
+
+
+@router.post("/{listing_id}/lock-price")
+def lock_price(
+    listing_id: int,
+    payload: LockPricePayload,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Lender accepts the listed price and skips negotiation entirely."""
+    if current_user.role != "lender":
+        raise HTTPException(status_code=403, detail="Only lenders can lock price")
+    try:
+        return lock_price_accept(db, listing_id, current_user, payload.amount)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
 

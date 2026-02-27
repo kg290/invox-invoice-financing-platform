@@ -53,10 +53,12 @@ const timeAgo = (dateStr: string | null) => {
 };
 
 const categoryIcons: Record<string, string> = {
-  Manufacturing: "🏭", Trading: "📦", Services: "💼", Retail: "🛒",
-  "Agriculture & Allied": "🌾", Construction: "🏗️", Textiles: "🧵",
-  "Food Processing": "🍕", "IT & Software": "💻", Healthcare: "🏥",
-  Education: "📚", "Transport & Logistics": "🚛",
+  "Textiles & Handloom": "🧵", "Food Processing": "🌾", "Leather & Footwear": "👜",
+  "Auto Components Manufacturing": "⚙️", "Garment & Knitwear Export": "👕",
+  "IT & Software Services": "💻", "Pharmaceutical Manufacturing": "💊",
+  "Steel & Metal Fabrication": "🔩", "Ceramics & Pottery": "🏺",
+  "Electronics Manufacturing": "🔌", Manufacturing: "🏭", Trading: "📦",
+  Services: "💼", Retail: "🛒", Construction: "🏗️",
 };
 
 const gradientBgs = [
@@ -193,23 +195,23 @@ export default function MarketplacePage() {
       <div className="relative overflow-hidden">
         <div className="absolute inset-0 bg-gradient-to-br from-indigo-600 via-violet-600 to-purple-700" />
         <div className="absolute inset-0 opacity-10" style={{ backgroundImage: "url(\"data:image/svg+xml,%3Csvg width='60' height='60' viewBox='0 0 60 60' xmlns='http://www.w3.org/2000/svg'%3E%3Cg fill='none' fill-rule='evenodd'%3E%3Cg fill='%23ffffff' fill-opacity='0.4'%3E%3Cpath d='M36 34v-4h-2v4h-4v2h4v4h2v-4h4v-2h-4zm0-30V0h-2v4h-4v2h4v4h2V6h4V4h-4zM6 34v-4H4v4H0v2h4v4h2v-4h4v-2H6zM6 4V0H4v4H0v2h4v4h2V6h4V4H6z'/%3E%3C/g%3E%3C/g%3E%3C/svg%3E\")" }} />
-        <div className="relative max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 pb-12">
+        <div className="relative max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6 pb-8">
           <div className="flex items-start justify-between">
             <div>
               <div className="inline-flex items-center gap-2 px-3 py-1.5 bg-white/15 backdrop-blur-sm rounded-full text-white/90 text-xs font-medium mb-4">
                 <Sparkles className="w-3.5 h-3.5" /> Blockchain-Secured Invoice Marketplace
               </div>
               <h1 className="text-3xl sm:text-4xl font-bold text-white mb-3 tracking-tight">
-                Discover Investment<br />Opportunities
+                MSME Invoice<br />Marketplace
               </h1>
               <p className="text-indigo-100 max-w-lg text-sm leading-relaxed">
-                Browse verified MSME invoices, assess risk with AI-powered scores, and fund businesses with blockchain-secured transparency.
+                Fund India&apos;s Micro, Small & Medium Enterprises. Udyam-verified invoices, AI credit scoring, and blockchain-secured transparency for every MSME transaction.
               </p>
             </div>
           </div>
 
           {/* Stats */}
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mt-8">
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mt-5">
             {[
               { label: "Total Listings", value: listings.length, icon: Store, accent: "from-white/20 to-white/5" },
               { label: "Open to Fund", value: openCount, icon: CircleDollarSign, accent: "from-emerald-400/30 to-emerald-400/5" },
@@ -227,7 +229,7 @@ export default function MarketplacePage() {
           </div>
 
           {/* Search bar */}
-          <div className="mt-6 relative max-w-2xl">
+          <div className="mt-4 relative max-w-2xl">
             <Search className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400" />
             <input
               type="text"
@@ -247,7 +249,7 @@ export default function MarketplacePage() {
 
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 -mt-4">
         {/* ─── Filter Bar ─── */}
-        <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-4 mb-6">
+        <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-4 mb-4">
           <div className="flex items-center justify-between gap-3 flex-wrap">
             {/* Status pills */}
             <div className="flex items-center gap-2 flex-wrap">
@@ -346,7 +348,7 @@ export default function MarketplacePage() {
                   onChange={(e) => setAdvFilters({ ...advFilters, business_type: e.target.value })}
                   className="w-full px-2.5 py-2 border border-gray-200 rounded-xl text-xs text-gray-900 bg-gray-50 focus:bg-white focus:ring-2 focus:ring-indigo-500 outline-none transition-all cursor-pointer">
                   <option value="">All Types</option>
-                  {["Proprietorship", "Partnership", "LLP", "Private Limited", "Public Limited"].map((t) => (
+                  {["Proprietorship", "Partnership", "LLP", "Pvt Ltd"].map((t) => (
                     <option key={t} value={t}>{t}</option>
                   ))}
                 </select>
@@ -379,7 +381,7 @@ export default function MarketplacePage() {
 
         {/* ─── Listings Grid ─── */}
         {loading ? (
-          <div className="flex flex-col items-center justify-center py-16">
+          <div className="flex flex-col items-center justify-center py-10">
             <div className="relative">
               <div className="w-16 h-16 border-4 border-indigo-100 rounded-full" />
               <div className="w-16 h-16 border-4 border-indigo-600 border-t-transparent rounded-full animate-spin absolute inset-0" />
@@ -387,7 +389,7 @@ export default function MarketplacePage() {
             <p className="text-sm text-gray-500 mt-4">Loading marketplace...</p>
           </div>
         ) : filtered.length === 0 ? (
-          <div className="text-center py-16 bg-white rounded-2xl border border-gray-100">
+          <div className="text-center py-10 bg-white rounded-2xl border border-gray-100">
             <div className="w-16 h-16 bg-gray-50 rounded-2xl flex items-center justify-center mx-auto mb-4">
               <Store className="w-8 h-8 text-gray-300" />
             </div>
@@ -397,7 +399,7 @@ export default function MarketplacePage() {
             </p>
           </div>
         ) : (
-          <div className={viewMode === "grid" ? "grid sm:grid-cols-2 lg:grid-cols-3 gap-5" : "space-y-4"}>
+          <div className={viewMode === "grid" ? "grid sm:grid-cols-2 lg:grid-cols-3 gap-4" : "space-y-3"}>
             {filtered.map((l, idx) => {
               const risk = riskMeter(l.risk_score);
               const cibil = cibilGrade(l.cibil_score);
@@ -460,9 +462,9 @@ export default function MarketplacePage() {
                   {/* Card Header / Image Section */}
                   <div className="relative">
                     {l.business_images?.length > 0 ? (
-                      <img src={fileUrl(l.business_images[0])} alt={l.business_name} className="w-full h-40 object-cover" />
+                          <img src={fileUrl(l.business_images[0])} alt={l.business_name} className="w-full h-32 object-cover" />
                     ) : (
-                      <div className={`w-full h-40 bg-gradient-to-br ${gradientBgs[gradientIdx]} flex items-center justify-center relative overflow-hidden`}>
+                      <div className={`w-full h-32 bg-gradient-to-br ${gradientBgs[gradientIdx]} flex items-center justify-center relative overflow-hidden`}>
                         <div className="absolute inset-0 opacity-20" style={{ backgroundImage: "url(\"data:image/svg+xml,%3Csvg width='40' height='40' viewBox='0 0 40 40' xmlns='http://www.w3.org/2000/svg'%3E%3Cg fill='%23fff' fill-opacity='0.15'%3E%3Cpath d='M0 40L40 0H20L0 20M40 40V20L20 40'/%3E%3C/g%3E%3C/svg%3E\")" }} />
                         <div className="text-center relative z-10">
                           <span className="text-4xl mb-2 block">{catIcon}</span>
@@ -498,7 +500,7 @@ export default function MarketplacePage() {
                   </div>
 
                   {/* Card Body */}
-                  <div className="p-5 flex-1 flex flex-col">
+                  <div className="p-4 flex-1 flex flex-col">
                     {/* Business name & info */}
                     <div className="flex items-start justify-between mb-3">
                       <div className="min-w-0 flex-1">
@@ -527,7 +529,7 @@ export default function MarketplacePage() {
                     </div>
 
                     {/* Business tags */}
-                    <div className="flex items-center gap-1.5 mb-4 flex-wrap">
+                    <div className="flex items-center gap-1.5 mb-3 flex-wrap">
                       {l.business_category && (
                         <span className="text-[10px] font-medium bg-gray-100 text-gray-600 px-2 py-0.5 rounded-md">{l.business_category}</span>
                       )}
@@ -544,11 +546,11 @@ export default function MarketplacePage() {
                       <p className="text-sm font-semibold text-indigo-700 mb-1">{l.listing_title}</p>
                     )}
                     {(l.listing_description || l.business_description) && (
-                      <p className="text-xs text-gray-500 mb-4 line-clamp-2 leading-relaxed">{l.listing_description || l.business_description}</p>
+                      <p className="text-xs text-gray-500 mb-3 line-clamp-2 leading-relaxed">{l.listing_description || l.business_description}</p>
                     )}
 
                     {/* Financial metrics */}
-                    <div className="bg-gray-50 rounded-xl p-3 space-y-2 mb-4">
+                    <div className="bg-gray-50 rounded-xl p-2.5 space-y-1.5 mb-3">
                       <div className="flex justify-between items-center">
                         <span className="text-[11px] text-gray-500 flex items-center gap-1"><IndianRupee className="w-3 h-3" /> Funding Ask</span>
                         <span className="text-sm font-bold text-gray-900">₹{l.requested_amount.toLocaleString("en-IN")}</span>
@@ -568,7 +570,7 @@ export default function MarketplacePage() {
                     </div>
 
                     {/* Risk Score Bar */}
-                    <div className="mb-4">
+                    <div className="mb-3">
                       <div className="flex items-center justify-between mb-1.5">
                         <span className="text-[11px] font-medium text-gray-500">Risk Assessment</span>
                         <span className={`text-[11px] font-bold ${risk.color}`}>{risk.label} · {l.risk_score?.toFixed(0) ?? "—"}/100</span>
@@ -580,7 +582,7 @@ export default function MarketplacePage() {
 
                     {/* ── Community Pot Progress Bar ── */}
                     {(l.listing_status === "open" || l.listing_status === "partially_funded" || l.listing_status === "funded") && (
-                      <div className="mb-4 bg-gradient-to-r from-indigo-50 to-purple-50 rounded-xl p-3 border border-indigo-100">
+                      <div className="mb-3 bg-gradient-to-r from-indigo-50 to-purple-50 rounded-xl p-2.5 border border-indigo-100">
                         <div className="flex items-center justify-between mb-1.5">
                           <span className="text-[11px] font-semibold text-indigo-700 flex items-center gap-1">
                             <Users className="w-3 h-3" /> Community Pot

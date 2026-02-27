@@ -460,6 +460,44 @@ export interface NegotiationChat {
   created_at: string | null;
 }
 
+// ═══════ Direct Chat Types ═══════
+
+export interface ChatConversation {
+  id: number;
+  other_user_id: number;
+  other_user_name: string;
+  other_user_role: string;
+  subject: string | null;
+  last_message: string | null;
+  last_message_at: string | null;
+  unread_count: number;
+  listing_id: number | null;
+  invoice_id: number | null;
+  created_at: string;
+}
+
+export interface ChatMessage {
+  id: number;
+  conversation_id: number;
+  sender_user_id: number;
+  message: string;
+  message_type: "text" | "offer" | "system" | "attachment";
+  attachment_url: string | null;
+  is_read: boolean;
+  created_at: string;
+}
+
+export interface ChatAvailableUser {
+  id: number;
+  name: string;
+  email: string;
+  role: string;
+  vendor_id: number | null;
+  lender_id: number | null;
+  business_name: string | null;
+  organization: string | null;
+}
+
 // ═══════ Auth Types ═══════
 
 export interface AuthUser {

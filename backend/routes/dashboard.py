@@ -14,6 +14,7 @@ from models import (
     FractionalInvestment,
 )
 from routes.auth import get_current_user
+from routes.vendor import calculate_risk_score_breakdown
 
 router = APIRouter(prefix="/api/dashboard", tags=["dashboard"])
 
@@ -116,13 +117,33 @@ def vendor_dashboard(vendor_id: int, db: Session = Depends(get_db), current_user
         "created_at": a.created_at.isoformat() if a.created_at else None,
     } for a in activities]
 
+    # ── Risk score breakdown ──
+    vendor_data = {
+        "cibil_score": vendor.cibil_score or 300,
+        "gst_compliance_status": vendor.gst_compliance_status or "Irregular",
+        "total_gst_filings": vendor.total_gst_filings or 0,
+        "year_of_establishment": vendor.year_of_establishment or 2024,
+        "annual_turnover": vendor.annual_turnover or 0,
+        "existing_liabilities": vendor.existing_liabilities or 0,
+        "business_assets_value": vendor.business_assets_value or 0,
+    }
+    risk_breakdown = calculate_risk_score_breakdown(vendor_data)
+
+    # Use calculated risk score (sum of breakdown factors) — not the stale vendor.risk_score field
+    calculated_risk_score = risk_breakdown.get("total_score", vendor.risk_score)
+
+    # Keep vendor DB field in sync
+    if vendor.risk_score != calculated_risk_score:
+        vendor.risk_score = calculated_risk_score
+        db.commit()
+
     return {
         "vendor": {
             "id": vendor.id,
             "name": vendor.full_name,
             "business_name": vendor.business_name,
             "profile_status": vendor.profile_status,
-            "risk_score": vendor.risk_score,
+            "risk_score": calculated_risk_score,
             "cibil_score": vendor.cibil_score,
         },
         "invoices": {
@@ -150,6 +171,7 @@ def vendor_dashboard(vendor_id: int, db: Session = Depends(get_db), current_user
         "verification": verification_summary,
         "monthly_trend": monthly_trend,
         "recent_activity": recent_activity,
+        "risk_breakdown": risk_breakdown,
     }
 
 

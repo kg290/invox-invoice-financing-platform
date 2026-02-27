@@ -26,6 +26,8 @@ from routes.factoring import router as factoring_router
 from routes.emandate import router as emandate_router
 from routes.ai_negotiator import router as ai_negotiator_router
 from routes.admin import router as admin_router
+from routes.chat import router as chat_router
+from routes.telegram import router as telegram_router
 
 # Create tables
 Base.metadata.create_all(bind=engine)
@@ -71,6 +73,8 @@ app.include_router(factoring_router)
 app.include_router(emandate_router)
 app.include_router(ai_negotiator_router)
 app.include_router(admin_router)
+app.include_router(chat_router)
+app.include_router(telegram_router)
 
 # Serve uploaded files (business photos, documents)
 _upload_dir = "/tmp/uploads" if os.environ.get("VERCEL") else "uploads"

@@ -280,6 +280,7 @@ class LenderResponse(BaseModel):
     phone: Optional[str] = None
     organization: Optional[str] = None
     lender_type: str
+    verification_status: Optional[str] = "unverified"
     created_at: Optional[str] = None
 
     class Config:
@@ -348,6 +349,10 @@ def list_invoice_on_marketplace(
     if not invoice:
         raise HTTPException(status_code=404, detail="Invoice not found")
 
+    # ── Vendor ownership check ──
+    if current_user.role == "vendor" and invoice.vendor_id != current_user.vendor_id:
+        raise HTTPException(status_code=403, detail="You can only list your own invoices")
+
     if invoice.is_listed:
         raise HTTPException(status_code=400, detail="Invoice is already listed on marketplace")
 
@@ -357,12 +362,13 @@ def list_invoice_on_marketplace(
     if invoice.payment_status == "paid":
         raise HTTPException(status_code=400, detail="Cannot list a fully paid invoice")
 
+    # ── Double-listing protection: check ALL active statuses ──
     existing = db.query(MarketplaceListing).filter(
         MarketplaceListing.invoice_id == invoice_id,
-        MarketplaceListing.listing_status.in_(["open", "funded"]),
+        MarketplaceListing.listing_status.in_(["open", "partially_funded", "funded"]),
     ).first()
     if existing:
-        raise HTTPException(status_code=400, detail="Invoice already has an active listing")
+        raise HTTPException(status_code=400, detail=f"Invoice already has an active listing (status: {existing.listing_status})")
 
     vendor = db.query(Vendor).filter(Vendor.id == invoice.vendor_id).first()
     requested_amount = round(invoice.grand_total * requested_percentage / 100, 2)
@@ -817,6 +823,17 @@ def fund_listing(listing_id: int, data: FundListingRequest, db: Session = Depend
     if not lender:
         raise HTTPException(status_code=404, detail="Lender not found")
 
+    # ── Self-funding check: vendor cannot fund their own listing ──
+    if current_user.vendor_id and current_user.vendor_id == listing.vendor_id:
+        raise HTTPException(status_code=403, detail="Vendors cannot fund their own listings")
+
+    # ── Wallet balance check & escrow lock ──
+    if lender.wallet_balance < data.funded_amount:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Insufficient wallet balance. Available: ₹{lender.wallet_balance:,.0f}, Required: ₹{data.funded_amount:,.0f}. Please top-up your wallet first.",
+        )
+
     invoice = db.query(Invoice).filter(Invoice.id == listing.invoice_id).first()
 
     # ── Create FractionalInvestment record ──
@@ -848,6 +865,12 @@ def fund_listing(listing_id: int, data: FundListingRequest, db: Session = Depend
         status="active",
     )
     db.add(frac)
+    db.flush()  # Ensure fractional investment is queryable for weighted avg calc
+
+    # ── Wallet: deduct from available, lock in escrow ──
+    lender.wallet_balance = round(lender.wallet_balance - data.funded_amount, 2)
+    lender.escrow_locked = round((lender.escrow_locked or 0) + data.funded_amount, 2)
+    lender.total_invested = round((lender.total_invested or 0) + data.funded_amount, 2)
 
     # ── Update listing aggregates ──
     new_total = (listing.total_funded_amount or 0) + data.funded_amount
@@ -879,9 +902,12 @@ def fund_listing(listing_id: int, data: FundListingRequest, db: Session = Depend
         num_installments = max(1, listing.repayment_period_days // 30)
         principal_per = round(new_total / num_installments, 2)
         annual_rate = avg_rate / 100
+        remaining_principal = new_total
         for i in range(1, num_installments + 1):
             due = datetime.now(timezone.utc) + timedelta(days=30 * i)
-            interest_amt = round((new_total * annual_rate * 30) / 365, 2)
+            # Declining balance: interest on remaining principal
+            interest_amt = round((remaining_principal * annual_rate * 30) / 365, 2)
+            remaining_principal = max(0, remaining_principal - principal_per)
             sched = RepaymentSchedule(
                 listing_id=listing_id,
                 installment_number=i,
@@ -942,6 +968,13 @@ def fund_listing(listing_id: int, data: FundListingRequest, db: Session = Depend
             "total_investors": listing.total_investors,
         }),
     ))
+
+    # ── Trigger credit score recalculation on funding event ──
+    try:
+        from services.credit_scoring import compute_credit_score
+        compute_credit_score(db, listing.vendor_id)
+    except Exception:
+        pass  # Non-critical — don't fail the funding
 
     db.commit()
     return {
@@ -1057,6 +1090,13 @@ def settle_listing(listing_id: int, db: Session = Depends(get_db), current_user:
         "settled_at": datetime.now(timezone.utc).isoformat(),
     }
     add_block(db, "settlement", block_data)
+
+    # ── Trigger credit score recalculation on settlement ──
+    try:
+        from services.credit_scoring import compute_credit_score
+        compute_credit_score(db, listing.vendor_id)
+    except Exception:
+        pass
 
     db.commit()
     return {"message": "Listing settled successfully"}
@@ -1289,5 +1329,286 @@ def pay_installment(listing_id: int, installment_id: int, db: Session = Depends(
                 "settled_at": datetime.now(timezone.utc).isoformat(),
             })
 
+    # ── Trigger credit score recalculation on repayment event ──
+    listing_for_rescore = db.query(MarketplaceListing).filter(MarketplaceListing.id == listing_id).first()
+    if listing_for_rescore:
+        try:
+            from services.credit_scoring import compute_credit_score
+            compute_credit_score(db, listing_for_rescore.vendor_id)
+        except Exception:
+            pass
+
     db.commit()
     return {"message": f"Installment #{sched.installment_number} paid", "remaining": remaining}
+
+
+# ═══════════════════════════════════════════════
+#  LENDER WALLET ENDPOINTS
+# ═══════════════════════════════════════════════
+
+class WalletTopUpRequest(BaseModel):
+    lender_id: int
+    amount: float = Field(..., gt=0, description="Amount to add to wallet (₹)")
+
+@router.get("/lender/{lender_id}/wallet")
+def get_lender_wallet(lender_id: int, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+    """Get lender wallet balance and summary."""
+    lender = db.query(Lender).filter(Lender.id == lender_id).first()
+    if not lender:
+        raise HTTPException(status_code=404, detail="Lender not found")
+
+    # Count active investments
+    active_investments = db.query(FractionalInvestment).filter(
+        FractionalInvestment.lender_id == lender_id,
+        FractionalInvestment.status == "active",
+    ).count()
+
+    return {
+        "lender_id": lender_id,
+        "lender_name": lender.name,
+        "wallet_balance": lender.wallet_balance,
+        "escrow_locked": lender.escrow_locked or 0,
+        "total_invested": lender.total_invested or 0,
+        "total_returns": lender.total_returns or 0,
+        "active_investments": active_investments,
+        "net_worth": round((lender.wallet_balance or 0) + (lender.escrow_locked or 0), 2),
+    }
+
+@router.post("/lender/wallet/topup")
+def topup_lender_wallet(data: WalletTopUpRequest, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+    """Add funds to lender's wallet (simulated bank transfer)."""
+    if current_user.role not in ("lender", "admin"):
+        raise HTTPException(status_code=403, detail="Only lenders or admins can top-up wallets")
+
+    lender = db.query(Lender).filter(Lender.id == data.lender_id).first()
+    if not lender:
+        raise HTTPException(status_code=404, detail="Lender not found")
+
+    lender.wallet_balance = round((lender.wallet_balance or 0) + data.amount, 2)
+
+    db.add(ActivityLog(
+        entity_type="lender", entity_id=lender.id,
+        action="wallet_topup",
+        description=f"Wallet topped up by ₹{data.amount:,.0f}. New balance: ₹{lender.wallet_balance:,.0f}",
+    ))
+
+    db.add(Notification(
+        user_id=current_user.id,
+        title="Wallet Top-Up ✅",
+        message=f"₹{data.amount:,.0f} added to your wallet. Balance: ₹{lender.wallet_balance:,.0f}",
+        notification_type="wallet",
+    ))
+
+    db.commit()
+    return {
+        "message": f"₹{data.amount:,.0f} added to wallet",
+        "new_balance": lender.wallet_balance,
+        "escrow_locked": lender.escrow_locked or 0,
+    }
+
+
+# ═══════════════════════════════════════════════
+#  REPAYMENT ENFORCEMENT ENGINE
+# ═══════════════════════════════════════════════
+
+OVERDUE_GRACE_DAYS = 7       # Days after due_date before marking 'overdue'
+DEFAULT_THRESHOLD_DAYS = 30  # Days overdue before auto-default
+LISTING_EXPIRY_DAYS = 60     # Days an unfunded listing stays open
+
+@router.post("/enforce-repayments")
+def enforce_repayments(db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+    """
+    Repayment enforcement engine — call periodically (or via cron/admin trigger).
+    1. Marks pending installments past due_date + grace as 'overdue'
+    2. Auto-defaults listings where installments are overdue > threshold
+    3. Expires stale open/partially_funded listings
+    4. Releases escrow to lenders on settlement
+    5. Triggers credit score recalculation for affected vendors
+    """
+    if current_user.role not in ("admin",):
+        raise HTTPException(status_code=403, detail="Only admins can trigger repayment enforcement")
+
+    today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    today_dt = datetime.now(timezone.utc)
+    results = {"overdue_marked": 0, "defaults_triggered": 0, "listings_expired": 0, "escrow_released": 0, "scores_recalculated": []}
+
+    # ── 1. Mark overdue installments ──
+    pending_schedules = db.query(RepaymentSchedule).filter(
+        RepaymentSchedule.status == "pending",
+    ).all()
+
+    vendors_to_rescore = set()
+    for sched in pending_schedules:
+        try:
+            due_dt = datetime.strptime(sched.due_date, "%Y-%m-%d").replace(tzinfo=timezone.utc)
+        except (ValueError, TypeError):
+            continue
+        grace_deadline = due_dt + timedelta(days=OVERDUE_GRACE_DAYS)
+        if today_dt >= grace_deadline:
+            sched.status = "overdue"
+            results["overdue_marked"] += 1
+
+            # Notify vendor
+            listing = db.query(MarketplaceListing).filter(MarketplaceListing.id == sched.listing_id).first()
+            if listing:
+                vendors_to_rescore.add(listing.vendor_id)
+                vendor_user = db.query(User).filter(User.vendor_id == listing.vendor_id).first()
+                if vendor_user:
+                    db.add(Notification(
+                        user_id=vendor_user.id,
+                        title="Overdue Installment ⚠️",
+                        message=f"Installment #{sched.installment_number} (₹{sched.total_amount:,.0f}) is overdue since {sched.due_date}. Please pay immediately to avoid default.",
+                        notification_type="repayment",
+                        link=f"/vendor/{listing.vendor_id}/invoices",
+                    ))
+
+    # ── 2. Auto-default listings with severely overdue installments ──
+    funded_listings = db.query(MarketplaceListing).filter(
+        MarketplaceListing.listing_status == "funded",
+    ).all()
+
+    for listing in funded_listings:
+        overdue_schedules = db.query(RepaymentSchedule).filter(
+            RepaymentSchedule.listing_id == listing.id,
+            RepaymentSchedule.status == "overdue",
+        ).all()
+
+        if not overdue_schedules:
+            continue
+
+        # Check if any installment is past the default threshold
+        worst_overdue_days = 0
+        for sched in overdue_schedules:
+            try:
+                due_dt = datetime.strptime(sched.due_date, "%Y-%m-%d").replace(tzinfo=timezone.utc)
+                days_overdue = (today_dt - due_dt).days
+                worst_overdue_days = max(worst_overdue_days, days_overdue)
+            except (ValueError, TypeError):
+                continue
+
+        if worst_overdue_days >= DEFAULT_THRESHOLD_DAYS:
+            listing.listing_status = "defaulted"
+            results["defaults_triggered"] += 1
+            vendors_to_rescore.add(listing.vendor_id)
+
+            # Log on blockchain
+            add_block(db, "default", {
+                "type": "auto_default",
+                "listing_id": listing.id,
+                "days_overdue": worst_overdue_days,
+                "overdue_installments": len(overdue_schedules),
+                "defaulted_at": today_dt.isoformat(),
+            })
+
+            # Notify vendor
+            vendor_user = db.query(User).filter(User.vendor_id == listing.vendor_id).first()
+            if vendor_user:
+                db.add(Notification(
+                    user_id=vendor_user.id,
+                    title="Listing Defaulted ❌",
+                    message=f"Your listing has been marked as DEFAULTED due to {len(overdue_schedules)} overdue installments ({worst_overdue_days} days overdue). This will severely impact your credit score.",
+                    notification_type="default",
+                    link=f"/vendor/{listing.vendor_id}/invoices",
+                ))
+
+            # Notify all investors
+            investors = db.query(FractionalInvestment).filter(
+                FractionalInvestment.listing_id == listing.id,
+                FractionalInvestment.status == "active",
+            ).all()
+            for inv in investors:
+                lender_user = db.query(User).filter(User.lender_id == inv.lender_id).first()
+                if lender_user:
+                    db.add(Notification(
+                        user_id=lender_user.id,
+                        title="Investment Default Alert 🚨",
+                        message=f"A listing you invested ₹{inv.invested_amount:,.0f} in has defaulted ({worst_overdue_days} days overdue).",
+                        notification_type="default",
+                        link=f"/marketplace/{listing.id}",
+                    ))
+
+    # ── 3. Expire stale unfunded listings ──
+    stale_listings = db.query(MarketplaceListing).filter(
+        MarketplaceListing.listing_status.in_(["open", "partially_funded"]),
+    ).all()
+
+    for listing in stale_listings:
+        if listing.created_at:
+            created_dt = listing.created_at if listing.created_at.tzinfo else listing.created_at.replace(tzinfo=timezone.utc)
+            days_open = (today_dt - created_dt).days
+            if days_open >= LISTING_EXPIRY_DAYS:
+                # Refund any partial investments before expiring
+                partial_investments = db.query(FractionalInvestment).filter(
+                    FractionalInvestment.listing_id == listing.id,
+                    FractionalInvestment.status == "active",
+                ).all()
+                for inv in partial_investments:
+                    inv_lender = db.query(Lender).filter(Lender.id == inv.lender_id).first()
+                    if inv_lender:
+                        inv_lender.wallet_balance = round((inv_lender.wallet_balance or 0) + inv.invested_amount, 2)
+                        inv_lender.escrow_locked = round(max(0, (inv_lender.escrow_locked or 0) - inv.invested_amount), 2)
+                        results["escrow_released"] += 1
+                    inv.status = "refunded"
+
+                listing.listing_status = "expired"
+                results["listings_expired"] += 1
+
+                # Reset invoice listing flag
+                invoice = db.query(Invoice).filter(Invoice.id == listing.invoice_id).first()
+                if invoice:
+                    invoice.is_listed = False
+
+                vendor_user = db.query(User).filter(User.vendor_id == listing.vendor_id).first()
+                if vendor_user:
+                    db.add(Notification(
+                        user_id=vendor_user.id,
+                        title="Listing Expired ⏰",
+                        message=f"Your listing has expired after {days_open} days without full funding. You may re-list the invoice.",
+                        notification_type="listing",
+                        link=f"/vendor/{listing.vendor_id}/invoices",
+                    ))
+
+    # ── 4. Release escrow for settled listings ──
+    settled_listings = db.query(MarketplaceListing).filter(
+        MarketplaceListing.listing_status == "settled",
+    ).all()
+
+    for listing in settled_listings:
+        # Check if escrow has already been released (no active investments with locked escrow)
+        active_investments = db.query(FractionalInvestment).filter(
+            FractionalInvestment.listing_id == listing.id,
+            FractionalInvestment.status == "active",
+        ).all()
+
+        for inv in active_investments:
+            inv_lender = db.query(Lender).filter(Lender.id == inv.lender_id).first()
+            if inv_lender:
+                # Release escrow + add returns
+                release_amount = inv.invested_amount
+                return_amount = inv.expected_return or 0
+                inv_lender.escrow_locked = round(max(0, (inv_lender.escrow_locked or 0) - release_amount), 2)
+                inv_lender.wallet_balance = round((inv_lender.wallet_balance or 0) + release_amount + return_amount, 2)
+                inv_lender.total_returns = round((inv_lender.total_returns or 0) + return_amount, 2)
+                results["escrow_released"] += 1
+            inv.status = "settled"
+
+    # ── 5. Trigger credit score recalculation for affected vendors ──
+    for vendor_id in vendors_to_rescore:
+        try:
+            from services.credit_scoring import compute_credit_score
+            compute_credit_score(db, vendor_id)
+            results["scores_recalculated"].append(vendor_id)
+        except Exception:
+            pass  # Don't fail the whole enforcement if one score fails
+
+    db.commit()
+
+    return {
+        "message": "Repayment enforcement completed",
+        "overdue_marked": results["overdue_marked"],
+        "defaults_triggered": results["defaults_triggered"],
+        "listings_expired": results["listings_expired"],
+        "escrow_released": results["escrow_released"],
+        "vendors_rescored": results["scores_recalculated"],
+        "enforcement_date": today,
+    }

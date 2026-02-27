@@ -24,6 +24,10 @@ class User(Base):
     is_verified = Column(Boolean, default=False)
     is_active = Column(Boolean, default=True)
     vendor_setup_json = Column(Text, nullable=True)  # JSON blob for pending vendor auto-setup data
+    telegram_chat_id = Column(String(50), nullable=True, unique=True, index=True)
+    telegram_username = Column(String(100), nullable=True)
+    telegram_link_code = Column(String(10), nullable=True, unique=True)  # 6-digit OTP for Telegram linking
+    telegram_link_code_expires = Column(DateTime(timezone=True), nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
     notifications = relationship("Notification", back_populates="user")
@@ -231,6 +235,14 @@ class Invoice(Base):
     is_listed = Column(Boolean, nullable=False, default=False)
     listed_at = Column(DateTime(timezone=True), nullable=True)
 
+    # ── OCR / Telegram Upload ──
+    file_path = Column(String(500), nullable=True)
+    ocr_status = Column(String(20), nullable=True)  # processing, ocr_done, failed
+    ocr_confidence = Column(Float, nullable=True)
+    ocr_raw_text = Column(Text, nullable=True)
+    ocr_warnings = Column(Text, nullable=True)
+    source = Column(String(20), nullable=True)  # web, telegram
+
     # ── System ──
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
@@ -323,6 +335,18 @@ class Lender(Base):
     phone = Column(String(15), nullable=True)
     organization = Column(String(255), nullable=True)
     lender_type = Column(String(50), nullable=False, default="individual")  # individual, nbfc, bank
+
+    # ── Identity Verification ──
+    pan_number = Column(String(10), nullable=True)
+    aadhaar_number = Column(String(12), nullable=True)
+    verification_status = Column(String(20), nullable=False, default="unverified")  # unverified, verified, failed
+
+    # ── Wallet / Escrow ──
+    wallet_balance = Column(Float, nullable=False, default=0.0)          # Available balance (₹)
+    escrow_locked = Column(Float, nullable=False, default=0.0)           # Locked in active investments (₹)
+    total_invested = Column(Float, nullable=False, default=0.0)          # Lifetime invested (₹)
+    total_returns = Column(Float, nullable=False, default=0.0)           # Lifetime returns received (₹)
+
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
     funded_listings = relationship("MarketplaceListing", back_populates="lender")
@@ -686,3 +710,46 @@ class NegotiationRound(Base):
     offer_score = Column(Float, nullable=True)
 
     created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+
+# ════════════════════════════════════════════════
+#  DIRECT CHAT — VENDOR ↔ LENDER MESSAGING
+# ════════════════════════════════════════════════
+class ChatConversation(Base):
+    """A conversation thread between a vendor and a lender, optionally linked to a listing."""
+    __tablename__ = "chat_conversations"
+
+    id = Column(Integer, primary_key=True, index=True, autoincrement=True)
+    vendor_user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    lender_user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    listing_id = Column(Integer, ForeignKey("marketplace_listings.id"), nullable=True)
+    invoice_id = Column(Integer, ForeignKey("invoices.id"), nullable=True)
+
+    subject = Column(String(255), nullable=True)
+    last_message_text = Column(Text, nullable=True)
+    last_message_at = Column(DateTime(timezone=True), nullable=True)
+    vendor_unread = Column(Integer, default=0)
+    lender_unread = Column(Integer, default=0)
+
+    is_active = Column(Boolean, default=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+    messages = relationship("ChatMessage", back_populates="conversation", order_by="ChatMessage.created_at")
+
+
+class ChatMessage(Base):
+    """Individual message within a conversation."""
+    __tablename__ = "chat_messages"
+
+    id = Column(Integer, primary_key=True, index=True, autoincrement=True)
+    conversation_id = Column(Integer, ForeignKey("chat_conversations.id"), nullable=False)
+    sender_user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+
+    message = Column(Text, nullable=False)
+    message_type = Column(String(20), default="text")  # text, offer, system, attachment
+    attachment_url = Column(String(500), nullable=True)
+
+    is_read = Column(Boolean, default=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+    conversation = relationship("ChatConversation", back_populates="messages")

@@ -102,6 +102,8 @@ export default function MarketplaceDetailPage() {
   const [offerForm, setOfferForm] = useState({ rate: 0, amount: 0, message: "" });
   const [sendingOffer, setSendingOffer] = useState(false);
   const [listingNegotiations, setListingNegotiations] = useState<NegotiationChat[]>([]);
+  const [lockingPrice, setLockingPrice] = useState(false);
+  const [lockPriceAmount, setLockPriceAmount] = useState(0);
 
   const fetchRepayments = () => {
     api.get(`/marketplace/listings/${listingId}/repayment`).then((r) => setRepayments(r.data.installments || [])).catch(() => {});
@@ -171,6 +173,25 @@ export default function MarketplaceDetailPage() {
     setChatSession(session);
     setOfferForm({ rate: session.max_interest_rate || 15, amount: session.remaining_amount || session.invoice_amount || 0, message: "" });
     setShowChat(true);
+  };
+
+  const lockPrice = async () => {
+    if (lockPriceAmount <= 0) {
+      toast.error("Enter an investment amount");
+      return;
+    }
+    setLockingPrice(true);
+    try {
+      const r = await api.post(`/negotiate/${listingId}/lock-price`, { amount: lockPriceAmount });
+      setChatSession(r.data);
+      setShowChat(true);
+      toast.success(`Price locked at ${detail?.max_interest_rate}%! Complete your investment.`);
+      // Refresh negotiations
+      api.get(`/negotiate/listing/${listingId}`).then((res) => setListingNegotiations(res.data || [])).catch(() => {});
+    } catch (err: unknown) {
+      toast.error(getErrorMessage(err, "Failed to lock price"));
+    }
+    setLockingPrice(false);
   };
 
   const acceptAndFund = () => {
@@ -307,12 +328,6 @@ export default function MarketplaceDetailPage() {
             </div>
           </div>
           <div className="flex items-center gap-2">
-            {isOpen && isLender && (
-              <button onClick={() => setShowFund(true)}
-                className="inline-flex items-center gap-1.5 px-5 py-2 bg-gradient-to-r from-emerald-500 to-green-600 text-white rounded-xl text-xs font-semibold hover:shadow-lg hover:shadow-green-200 transition-all active:scale-[0.98]">
-                <HandCoins className="w-4 h-4" /> Fund This Invoice
-              </button>
-            )}
           </div>
         </div>
       </header>
@@ -964,33 +979,7 @@ export default function MarketplaceDetailPage() {
               )}
             </div>
 
-            {/* Fund CTA Card */}
-            {isOpen && isLender && (
-              <div className="bg-gradient-to-br from-emerald-500 to-green-600 rounded-2xl p-6 text-white shadow-xl shadow-emerald-100">
-                <div className="flex items-center gap-2 mb-3">
-                  <CircleDollarSign className="w-5 h-5" />
-                  <h3 className="text-base font-bold">Invest in This Invoice</h3>
-                </div>
-                <p className="text-emerald-100 text-xs mb-4 leading-relaxed">
-                  Earn up to {detail.max_interest_rate}% returns by investing as little as ₹{(detail.min_investment || 500).toLocaleString("en-IN")} in this blockchain-verified invoice.
-                </p>
-                <div className="bg-white/15 backdrop-blur-sm rounded-xl p-3 mb-4 space-y-1.5 text-xs">
-                  <div className="flex justify-between"><span className="text-white/80">Total Ask</span><span className="font-bold">₹{detail.requested_amount.toLocaleString("en-IN")}</span></div>
-                  <div className="flex justify-between"><span className="text-white/80">Remaining</span><span className="font-bold">₹{(detail.remaining_amount || detail.requested_amount).toLocaleString("en-IN")}</span></div>
-                  <div className="flex justify-between"><span className="text-white/80">Max Returns</span><span className="font-bold">{detail.max_interest_rate}% p.a.</span></div>
-                  <div className="flex justify-between"><span className="text-white/80">Tenure</span><span className="font-bold">{detail.repayment_period_days} days</span></div>
-                  <div className="flex justify-between"><span className="text-white/80">Investors</span><span className="font-bold">{detail.total_investors || 0}</span></div>
-                </div>
-                <button onClick={() => setShowFund(true)}
-                  className="w-full py-3 bg-white text-emerald-700 rounded-xl text-sm font-bold hover:bg-emerald-50 transition-all active:scale-[0.98]">
-                  Invest Now →
-                </button>
-                <div className="flex items-center justify-center gap-1.5 mt-3 text-[10px] text-white/70">
-                  <Lock className="w-3 h-3" />
-                  <span>Secured by InvoX Pay Gateway</span>
-                </div>
-              </div>
-            )}
+            {/* Fund CTA removed — payments only go through negotiation or lock price */}
 
             {/* ──── AI NEGOTIATION CHAT ──── */}
             {isOpen && isLender && (
@@ -1058,6 +1047,36 @@ export default function MarketplaceDetailPage() {
                         </>
                       )}
                     </button>
+
+                    {/* Lock Price — skip negotiation */}
+                    <div className="mt-3 border-t border-white/20 pt-3">
+                      <p className="text-[10px] text-white/60 font-semibold mb-2 uppercase tracking-wider text-center">Or skip negotiation</p>
+                      <div className="flex gap-2 mb-2">
+                        <div className="relative flex-1">
+                          <span className="absolute left-3 top-1/2 -translate-y-1/2 text-white/60 text-xs">₹</span>
+                          <input
+                            type="number"
+                            value={lockPriceAmount || ""}
+                            onChange={(e) => setLockPriceAmount(Number(e.target.value))}
+                            placeholder="Investment amount"
+                            className="w-full pl-7 pr-3 py-2 bg-white/10 border border-white/20 rounded-lg text-white text-xs placeholder-white/40 focus:outline-none focus:border-white/50"
+                          />
+                        </div>
+                      </div>
+                      <button
+                        onClick={lockPrice}
+                        disabled={lockingPrice || lockPriceAmount <= 0}
+                        className="w-full py-2.5 bg-emerald-500 hover:bg-emerald-400 text-white rounded-xl text-xs font-bold transition-all active:scale-[0.98] disabled:opacity-50 inline-flex items-center justify-center gap-2"
+                      >
+                        {lockingPrice ? (
+                          <><Loader2 className="w-3.5 h-3.5 animate-spin" /> Locking...</>
+                        ) : (
+                          <>🔒 Lock Listed Price ({detail?.max_interest_rate}%)</>
+                        )}
+                      </button>
+                      <p className="text-[9px] text-white/40 text-center mt-1">Accept the listed rate instantly — no negotiation needed</p>
+                    </div>
+
                     <p className="text-[10px] text-white/40 text-center mt-2">AI agent negotiates on behalf of the vendor</p>
                   </div>
                 </div>

@@ -16,3 +16,5 @@ google-api-python-client
 httpx
 python-dotenv
 requests
+razorpay
+google-cloud-vision

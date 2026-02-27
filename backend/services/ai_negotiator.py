@@ -229,84 +229,77 @@ def _generate_ai_response(
             "funding_pct": funding_pct,
         }
 
-    # ── COUNTER-OFFER: The interesting part ──
+    # ── COUNTER-OFFER: Focused 2-round negotiation ──
 
     # How far from target?
     gap = lender_rate - target_rate
-    pressure_factor = min(1.0, round_num / max_rounds)  # increases as rounds go by
 
-    # Suggest a rate
+    # Suggest a rate — be aggressive in 2-round format
     if lender_rate > max_rate:
-        # Above cap — push hard
-        suggested = round(max_rate - random.uniform(0.5, 1.5), 1)
+        suggested = round(max_rate - random.uniform(0.3, 1.0), 1)
         urgency = "high"
     elif lender_rate > acceptable_rate:
-        # Above acceptable — push moderately
-        reduction = gap * (0.4 + pressure_factor * 0.2) + random.uniform(-0.2, 0.2)
-        suggested = round(max(target_rate, lender_rate - reduction), 1)
+        suggested = round(target_rate + random.uniform(0.0, 0.5), 1)
         urgency = "medium"
     else:
-        # Close to target — gentle push
-        reduction = gap * (0.2 + pressure_factor * 0.15)
-        suggested = round(max(good_rate, lender_rate - reduction), 1)
+        suggested = round(max(good_rate, lender_rate - gap * 0.5), 1)
         urgency = "low"
 
-    # Build message based on context
+    # Build substantive message for 2-round format
     parts = []
 
     if round_num == 1:
         parts.append(
-            f"Thank you for your offer of **{lender_rate:.1f}%**. "
-            f"Based on this vendor's **{session.vendor_risk_grade}** credit profile "
-            f"({session.vendor_credit_score:.0f}/100 score), the fair market rate "
-            f"is around **{fair_rate:.1f}%**."
+            f"Thank you for your offer of **{lender_rate:.1f}%** for ₹{lender_amount:,.0f}."
         )
-    elif round_num == 2:
-        parts.append(f"I see you're at **{lender_rate:.1f}%** now.")
+        parts.append(
+            f"This vendor has a **{session.vendor_risk_grade}** credit rating "
+            f"({session.vendor_credit_score:.0f}/100) with a fair market rate of **{fair_rate:.1f}%**."
+        )
     else:
-        parts.append(f"Your revised offer of **{lender_rate:.1f}%** is noted.")
+        parts.append(f"Your revised offer of **{lender_rate:.1f}%** for ₹{lender_amount:,.0f} is noted.")
 
     # Competing offer leverage
     if best_competing and best_competing < lender_rate:
         parts.append(
-            f"Just so you know, we have another lender offering **{best_competing:.1f}%** "
-            f"on this same invoice. You'd need to beat that to win this deal."
+            f"Note: another lender is offering **{best_competing:.1f}%** on this invoice. "
+            f"You'll need to beat that to win this deal."
         )
 
-    # Amount commentary — Community Pot aware
+    # Amount commentary
     if lender_amount < min_investment and lender_amount < remaining_amount:
         parts.append(
-            f"Your investment of ₹{lender_amount:,.0f} is below our minimum of ₹{min_investment:,.0f}. "
-            f"Please increase your amount."
+            f"Your investment of ₹{lender_amount:,.0f} is below our minimum of ₹{min_investment:,.0f}."
         )
     elif total_investors > 0:
-        # Show community pot context
         parts.append(
-            f"Your investment of ₹{lender_amount:,.0f} ({funding_pct:.0f}% of remaining ₹{remaining_amount:,.0f}) "
-            f"would join **{total_investors}** existing investor(s) in the community pot."
+            f"Your ₹{lender_amount:,.0f} ({funding_pct:.0f}% of remaining ₹{remaining_amount:,.0f}) "
+            f"joins **{total_investors}** existing investor(s) in the community pot."
         )
 
     # Rate push
     if urgency == "high":
         parts.append(
-            f"Your rate is above the vendor's **{max_rate:.1f}% cap**. "
-            f"We need you below that. Can you come down to around **{suggested:.1f}%**?"
+            f"Your rate exceeds the vendor's **{max_rate:.1f}% cap**. "
+            f"**I need you at {suggested:.1f}%** or below. This is a verified invoice with blockchain security."
         )
     elif urgency == "medium":
         parts.append(
-            f"We're looking for something closer to **{suggested:.1f}%**. "
-            f"The vendor has a strong repayment track record and this is a verified invoice."
+            f"Given the vendor's strong credit profile and verified invoice, "
+            f"**{suggested:.1f}%** would be fair. Can you match that?"
         )
     else:
         parts.append(
-            f"You're getting close! Could you stretch to **{suggested:.1f}%**? "
-            f"That would make this a win-win deal."
+            f"You're close! **{suggested:.1f}%** would make this a win-win. "
+            f"The vendor has a solid repayment history."
         )
 
     # Round pressure
     rounds_left = max_rounds - round_num
-    if rounds_left <= 2:
-        parts.append(f"*{rounds_left} round{'s' if rounds_left > 1 else ''} remaining in this negotiation.*")
+    if rounds_left == 1:
+        parts.append("⚠️ **This is your last chance** — next round is final.")
+    elif rounds_left == 0:
+        parts.append("⚠️ **Final round** — make your best offer now.")
 
     return {
         "message": " ".join(parts),
@@ -390,7 +383,7 @@ def start_chat(db: Session, listing_id: int, lender_user: User) -> dict:
         max_interest_rate=listing.max_interest_rate,
         tenure_days=tenure_days,
         current_round=0,
-        max_rounds=6,
+        max_rounds=2,
         status="active",
     )
     db.add(session)
@@ -646,3 +639,78 @@ def get_lender_negotiations(db: Session, lender_user_id: int) -> list:
         results.append(chat)
 
     return results
+
+
+def lock_price_accept(db: Session, listing_id: int, lender_user: User, amount: float) -> dict:
+    """
+    Lender accepts the listed max_interest_rate without negotiation.
+    Creates a session that is immediately 'accepted'.
+    """
+    listing = db.query(MarketplaceListing).filter(MarketplaceListing.id == listing_id).first()
+    if not listing:
+        raise ValueError("Listing not found")
+    if listing.listing_status not in ("open", "partially_funded"):
+        raise ValueError(f"Listing is '{listing.listing_status}', must be open")
+
+    lender = db.query(Lender).filter(Lender.id == lender_user.lender_id).first()
+    if not lender:
+        raise ValueError("You must be a registered lender")
+
+    remaining = round((listing.requested_amount or 0) - (listing.total_funded_amount or 0), 2)
+    if amount > remaining + 0.01:
+        raise ValueError(f"Amount exceeds remaining amount of the listing")
+    min_inv = listing.min_investment or 500
+    if amount < min_inv and amount < remaining:
+        raise ValueError(f"Minimum investment is {min_inv}")
+
+    try:
+        score_data = compute_credit_score(db, listing.vendor_id)
+        vendor_score = score_data["total_score"]
+        risk_grade = score_data["risk_grade"]
+    except Exception:
+        vendor_score = 55.0
+        risk_grade = "BB"
+
+    session = NegotiationSession(
+        listing_id=listing_id,
+        vendor_id=listing.vendor_id,
+        lender_id=lender.id,
+        lender_user_id=lender_user.id,
+        invoice_amount=listing.requested_amount,
+        vendor_credit_score=vendor_score,
+        vendor_risk_grade=risk_grade,
+        fair_market_rate=_risk_based_rate(vendor_score, risk_grade),
+        max_interest_rate=listing.max_interest_rate,
+        tenure_days=listing.repayment_period_days or 90,
+        current_round=0,
+        max_rounds=0,
+        status="accepted",
+        final_rate=listing.max_interest_rate,
+        final_amount=amount,
+        final_score=100,
+        completed_at=datetime.now(timezone.utc),
+    )
+    db.add(session)
+    db.flush()
+
+    msg = NegotiationMessage(
+        session_id=session.id,
+        sender="ai_agent",
+        message=(
+            f"**Price Locked!**\n\n"
+            f"The lender has accepted the listed rate of **{listing.max_interest_rate:.1f}%** "
+            f"for an investment of **₹{amount:,.0f}**.\n\n"
+            f"No negotiation needed — deal is confirmed at the vendor's listed terms. "
+            f"**Deal accepted!**"
+        ),
+        message_type="accept",
+        offered_rate=listing.max_interest_rate,
+        offered_amount=amount,
+        funding_percentage=round((amount / remaining * 100), 1) if remaining > 0 else 100,
+        offer_score=100,
+    )
+    db.add(msg)
+    db.commit()
+    db.refresh(session)
+
+    return format_chat(db, session)

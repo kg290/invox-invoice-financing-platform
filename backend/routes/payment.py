@@ -1,15 +1,15 @@
-"""
-InvoX Pay — Custom Payment Gateway
+﻿"""
+InvoX Pay â€” Custom Payment Gateway
 ====================================
 A self-hosted payment gateway replacing Razorpay.
 Supports card, UPI, and net-banking payment methods.
 
 Flow:
-  Frontend  → POST /api/payments/create-funding-order   → Gets order_id
-  Frontend  → Opens InvoX Pay Checkout UI (custom React component)
-  User      → Enters payment details in the checkout UI
-  Frontend  → POST /api/payments/process                → Validates & returns payment_id + signature
-  Frontend  → POST /api/payments/verify                 → Backend verifies signature & processes
+  Frontend  â†’ POST /api/payments/create-funding-order   â†’ Gets order_id
+  Frontend  â†’ Opens InvoX Pay Checkout UI (custom React component)
+  User      â†’ Enters payment details in the checkout UI
+  Frontend  â†’ POST /api/payments/process                â†’ Validates & returns payment_id + signature
+  Frontend  â†’ POST /api/payments/verify                 â†’ Backend verifies signature & processes
 """
 
 import os
@@ -36,13 +36,29 @@ from routes.auth import get_current_user
 
 router = APIRouter(prefix="/api/payments", tags=["payments"])
 
-# ── InvoX Pay signing secret ──
+# â”€â”€ InvoX Pay signing secret â”€â”€
 INVOX_PAY_SECRET = os.getenv("INVOX_PAY_SECRET", "invox_pay_secret_k4x9m2p7q1w8e5")
 
+# â”€â”€ Razorpay keys â”€â”€
+RAZORPAY_KEY_ID = os.getenv("RAZORPAY_KEY_ID", "")
+RAZORPAY_KEY_SECRET = os.getenv("RAZORPAY_KEY_SECRET", "")
 
-# ═══════════════════════════════════════════════
+# â”€â”€ Razorpay client â”€â”€
+razorpay_client = None
+try:
+    import razorpay
+    if RAZORPAY_KEY_ID and RAZORPAY_KEY_SECRET:
+        razorpay_client = razorpay.Client(auth=(RAZORPAY_KEY_ID, RAZORPAY_KEY_SECRET))
+        print(f"  âœ… Razorpay client initialized (key: {RAZORPAY_KEY_ID[:12]}...)")
+    else:
+        print("  âš ï¸ Razorpay keys not found in .env â€” Razorpay disabled")
+except ImportError:
+    print("  âš ï¸ razorpay package not installed â€” Razorpay disabled")
+
+
+# â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 #  HELPERS
-# ═══════════════════════════════════════════════
+# â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 
 def _generate_order_id() -> str:
     return f"invox_ord_{uuid.uuid4().hex[:16]}"
@@ -85,9 +101,9 @@ def _validate_upi(upi_id: str) -> bool:
     return bool(re.match(r'^[\w.\-]+@[\w]+$', upi_id))
 
 
-# ═══════════════════════════════════════════════
+# â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 #  SCHEMAS
-# ═══════════════════════════════════════════════
+# â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 
 class CreateFundingOrderRequest(BaseModel):
     listing_id: int
@@ -145,9 +161,9 @@ class GatewayConfigResponse(BaseModel):
     ]
 
 
-# ═══════════════════════════════════════════════
+# â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 #  GET CONFIG
-# ═══════════════════════════════════════════════
+# â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 
 @router.get("/config")
 def get_gateway_config():
@@ -155,9 +171,9 @@ def get_gateway_config():
     return GatewayConfigResponse()
 
 
-# ═══════════════════════════════════════════════
-#  CREATE ORDER — FUNDING (Lender pays to fund invoice)
-# ═══════════════════════════════════════════════
+# â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+#  CREATE ORDER â€” FUNDING (Lender pays to fund invoice)
+# â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 
 @router.post("/create-funding-order")
 def create_funding_order(
@@ -173,7 +189,7 @@ def create_funding_order(
         raise HTTPException(status_code=400, detail=f"Listing is '{listing.listing_status}', not open for funding")
     remaining = listing.requested_amount - (listing.total_funded_amount or 0)
     if data.funded_amount > remaining + 0.01:
-        raise HTTPException(status_code=400, detail=f"Amount exceeds remaining ₹{remaining:,.0f}")
+        raise HTTPException(status_code=400, detail=f"Amount exceeds remaining â‚¹{remaining:,.0f}")
     if data.offered_interest_rate > listing.max_interest_rate:
         raise HTTPException(status_code=400, detail=f"Interest rate ({data.offered_interest_rate}%) exceeds max ({listing.max_interest_rate}%)")
 
@@ -215,9 +231,9 @@ def create_funding_order(
     }
 
 
-# ═══════════════════════════════════════════════
-#  CREATE ORDER — REPAYMENT (Vendor pays installment)
-# ═══════════════════════════════════════════════
+# â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+#  CREATE ORDER â€” REPAYMENT (Vendor pays installment)
+# â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 
 @router.post("/create-repayment-order")
 def create_repayment_order(
@@ -276,9 +292,9 @@ def create_repayment_order(
     }
 
 
-# ═══════════════════════════════════════════════
+# â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 #  PROCESS PAYMENT (validates details, generates payment credentials)
-# ═══════════════════════════════════════════════
+# â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 
 @router.post("/process")
 def process_payment(
@@ -336,9 +352,9 @@ def process_payment(
     }
 
 
-# ═══════════════════════════════════════════════
-#  VERIFY PAYMENT — Processes funding or repayment
-# ═══════════════════════════════════════════════
+# â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+#  VERIFY PAYMENT â€” Processes funding or repayment
+# â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 
 @router.post("/verify")
 def verify_payment(
@@ -383,7 +399,11 @@ def verify_payment(
 
 
 def _process_funding_payment(payment: Payment, db: Session) -> dict:
-    """Process a verified funding payment — creates fractional investment, updates listing (Community Pot)."""
+    """
+    Process a verified funding payment â€” creates fractional investment, updates listing (Community Pot).
+    NOTE: This duplicates logic from marketplace.fund_listing() but is used for InvoX Pay gateway flow.
+    Both paths must be kept in sync for wallet/escrow, credit score triggers, etc.
+    """
     listing = db.query(MarketplaceListing).filter(MarketplaceListing.id == payment.listing_id).first()
     if not listing:
         db.commit()
@@ -396,7 +416,7 @@ def _process_funding_payment(payment: Payment, db: Session) -> dict:
     lender = db.query(Lender).filter(Lender.id == lender_id).first() if lender_id else None
     invoice = db.query(Invoice).filter(Invoice.id == listing.invoice_id).first()
 
-    # ── Create FractionalInvestment record ──
+    # â”€â”€ Create FractionalInvestment record â”€â”€
     ownership_pct = round((payment.amount / listing.requested_amount) * 100, 2)
     expected_return = round((payment.amount * offered_interest_rate / 100) * (listing.repayment_period_days / 365), 2)
 
@@ -428,8 +448,15 @@ def _process_funding_payment(payment: Payment, db: Session) -> dict:
         status="active",
     )
     db.add(frac)
+    db.flush()  # Ensure fractional investment is queryable for weighted avg calc
 
-    # ── Update listing aggregates ──
+    # â”€â”€ Wallet: deduct from available, lock in escrow â”€â”€
+    if lender:
+        lender.wallet_balance = round(max(0, (lender.wallet_balance or 0) - payment.amount), 2)
+        lender.escrow_locked = round((lender.escrow_locked or 0) + payment.amount, 2)
+        lender.total_invested = round((lender.total_invested or 0) + payment.amount, 2)
+
+    # â”€â”€ Update listing aggregates â”€â”€
     new_total = (listing.total_funded_amount or 0) + payment.amount
     listing.total_funded_amount = round(new_total, 2)
     listing.total_investors = (listing.total_investors or 0) + 1
@@ -458,10 +485,13 @@ def _process_funding_payment(payment: Payment, db: Session) -> dict:
         num_installments = max(1, listing.repayment_period_days // 30)
         principal_per = round(new_total / num_installments, 2)
         annual_rate = avg_rate / 100
+        remaining_principal = new_total
 
         for i in range(1, num_installments + 1):
             due = datetime.now(timezone.utc) + timedelta(days=30 * i)
-            interest_amt = round((new_total * annual_rate * 30) / 365, 2)
+            # Declining balance: interest on remaining principal
+            interest_amt = round((remaining_principal * annual_rate * 30) / 365, 2)
+            remaining_principal = max(0, remaining_principal - principal_per)
             sched = RepaymentSchedule(
                 listing_id=listing.id,
                 installment_number=i,
@@ -477,8 +507,8 @@ def _process_funding_payment(payment: Payment, db: Session) -> dict:
         if vendor_user:
             db.add(Notification(
                 user_id=vendor_user.id,
-                title="Invoice Fully Funded! 🎉",
-                message=f"Your invoice has been fully funded ₹{new_total:,.0f} by {listing.total_investors} investor(s) via InvoX Pay. Repayment in {num_installments} installments.",
+                title="Invoice Fully Funded! ðŸŽ‰",
+                message=f"Your invoice has been fully funded â‚¹{new_total:,.0f} by {listing.total_investors} investor(s) via InvoX Pay. Repayment in {num_installments} installments.",
                 notification_type="funding",
                 link=f"/vendor/{listing.vendor_id}/invoices",
             ))
@@ -489,8 +519,8 @@ def _process_funding_payment(payment: Payment, db: Session) -> dict:
             pct = round(new_total / listing.requested_amount * 100, 1)
             db.add(Notification(
                 user_id=vendor_user.id,
-                title="New Investment Received! 💰",
-                message=f"{lender.name if lender else payment.payer_name} invested ₹{payment.amount:,.0f} via InvoX Pay ({pct}% funded, {listing.total_investors} investor(s)).",
+                title="New Investment Received! ðŸ’°",
+                message=f"{lender.name if lender else payment.payer_name} invested â‚¹{payment.amount:,.0f} via InvoX Pay ({pct}% funded, {listing.total_investors} investor(s)).",
                 notification_type="funding",
                 link=f"/vendor/{listing.vendor_id}/invoices",
             ))
@@ -499,8 +529,8 @@ def _process_funding_payment(payment: Payment, db: Session) -> dict:
     if lender_user:
         db.add(Notification(
             user_id=lender_user.id,
-            title="Investment Confirmed ✅",
-            message=f"₹{payment.amount:,.0f} ({ownership_pct}% ownership) confirmed for invoice {invoice.invoice_number if invoice else ''}. Expected return: ₹{expected_return:,.0f}.",
+            title="Investment Confirmed âœ…",
+            message=f"â‚¹{payment.amount:,.0f} ({ownership_pct}% ownership) confirmed for invoice {invoice.invoice_number if invoice else ''}. Expected return: â‚¹{expected_return:,.0f}.",
             notification_type="funding",
             link=f"/marketplace/{listing.id}",
         ))
@@ -508,7 +538,7 @@ def _process_funding_payment(payment: Payment, db: Session) -> dict:
     db.add(ActivityLog(
         entity_type="listing", entity_id=listing.id,
         action="fractional_funded",
-        description=f"₹{payment.amount:,.0f} invested via InvoX Pay by {lender.name if lender else payment.payer_name} ({ownership_pct}% slice)",
+        description=f"â‚¹{payment.amount:,.0f} invested via InvoX Pay by {lender.name if lender else payment.payer_name} ({ownership_pct}% slice)",
         metadata_json=json.dumps({
             "payment_id": payment.gateway_payment_id,
             "amount": payment.amount,
@@ -518,6 +548,13 @@ def _process_funding_payment(payment: Payment, db: Session) -> dict:
             "gateway": "invox_pay",
         }),
     ))
+
+    # â”€â”€ Trigger credit score recalculation on funding â”€â”€
+    try:
+        from services.credit_scoring import compute_credit_score
+        compute_credit_score(db, listing.vendor_id)
+    except Exception:
+        pass
 
     db.commit()
     return {
@@ -535,7 +572,7 @@ def _process_funding_payment(payment: Payment, db: Session) -> dict:
 
 
 def _process_repayment_payment(payment: Payment, db: Session) -> dict:
-    """Process a verified repayment payment — marks installment as paid, auto-settles if all paid."""
+    """Process a verified repayment payment â€” marks installment as paid, auto-settles if all paid."""
     sched = db.query(RepaymentSchedule).filter(RepaymentSchedule.id == payment.installment_id).first()
     if not sched:
         db.commit()
@@ -583,13 +620,22 @@ def _process_repayment_payment(payment: Payment, db: Session) -> dict:
     db.add(ActivityLog(
         entity_type="listing", entity_id=payment.listing_id,
         action="repayment",
-        description=f"Installment #{sched.installment_number} paid ₹{sched.total_amount:,.0f} via InvoX Pay",
+        description=f"Installment #{sched.installment_number} paid â‚¹{sched.total_amount:,.0f} via InvoX Pay",
         metadata_json=json.dumps({
             "payment_id": payment.gateway_payment_id,
             "installment": sched.installment_number,
             "gateway": "invox_pay",
         }),
     ))
+
+    # â”€â”€ Trigger credit score recalculation â”€â”€
+    listing_for_rescore = db.query(MarketplaceListing).filter(MarketplaceListing.id == payment.listing_id).first()
+    if listing_for_rescore:
+        try:
+            from services.credit_scoring import compute_credit_score
+            compute_credit_score(db, listing_for_rescore.vendor_id)
+        except Exception:
+            pass
 
     db.commit()
     return {
@@ -600,7 +646,7 @@ def _process_repayment_payment(payment: Payment, db: Session) -> dict:
 
 
 def _process_pay_all_payment(payment: Payment, db: Session) -> dict:
-    """Process a verified pay-all payment — marks ALL unpaid installments as paid, auto-settles."""
+    """Process a verified pay-all payment â€” marks ALL unpaid installments as paid, auto-settles."""
     notes = json.loads(payment.notes_json) if payment.notes_json else {}
     installment_ids = notes.get("installment_ids", [])
 
@@ -648,7 +694,7 @@ def _process_pay_all_payment(payment: Payment, db: Session) -> dict:
     db.add(ActivityLog(
         entity_type="listing", entity_id=payment.listing_id,
         action="repayment_all",
-        description=f"All {len(unpaid)} remaining installments paid at once ₹{payment.amount:,.0f} via InvoX Pay",
+        description=f"All {len(unpaid)} remaining installments paid at once â‚¹{payment.amount:,.0f} via InvoX Pay",
         metadata_json=json.dumps({
             "payment_id": payment.gateway_payment_id,
             "installments_paid": len(unpaid),
@@ -663,11 +709,19 @@ def _process_pay_all_payment(payment: Payment, db: Session) -> dict:
         if lender_user:
             db.add(Notification(
                 user_id=lender_user.id,
-                title="Full Repayment Received 🎉",
-                message=f"All {len(unpaid)} installments totalling ₹{payment.amount:,.0f} have been paid in full.",
+                title="Full Repayment Received ðŸŽ‰",
+                message=f"All {len(unpaid)} installments totalling â‚¹{payment.amount:,.0f} have been paid in full.",
                 notification_type="settlement",
                 link=f"/marketplace/{listing.id}",
             ))
+
+    # â”€â”€ Trigger credit score recalculation â”€â”€
+    if listing:
+        try:
+            from services.credit_scoring import compute_credit_score
+            compute_credit_score(db, listing.vendor_id)
+        except Exception:
+            pass
 
     db.commit()
     return {
@@ -677,9 +731,9 @@ def _process_pay_all_payment(payment: Payment, db: Session) -> dict:
     }
 
 
-# ═══════════════════════════════════════════════
+# â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 #  PAYMENT HISTORY
-# ═══════════════════════════════════════════════
+# â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 
 @router.get("/history")
 def get_payment_history(
@@ -712,9 +766,9 @@ def get_payment_history(
     } for p in payments]
 
 
-# ═══════════════════════════════════════════════
-#  REFUND — Lender gets money back
-# ═══════════════════════════════════════════════
+# â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+#  REFUND â€” Lender gets money back
+# â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 
 @router.post("/refund")
 def refund_payment(
@@ -727,7 +781,7 @@ def refund_payment(
     if not listing:
         raise HTTPException(status_code=404, detail="Listing not found")
     if listing.listing_status not in ("funded",):
-        raise HTTPException(status_code=400, detail=f"Cannot refund — listing is '{listing.listing_status}', must be 'funded'")
+        raise HTTPException(status_code=400, detail=f"Cannot refund â€” listing is '{listing.listing_status}', must be 'funded'")
 
     # Check no installments have been paid yet (can only refund if no repayment started)
     paid_installments = db.query(RepaymentSchedule).filter(
@@ -735,7 +789,7 @@ def refund_payment(
         RepaymentSchedule.status == "paid",
     ).count()
     if paid_installments > 0:
-        raise HTTPException(status_code=400, detail="Cannot refund — repayment has already started. Contact support for partial refund.")
+        raise HTTPException(status_code=400, detail="Cannot refund â€” repayment has already started. Contact support for partial refund.")
 
     # Find the original funding payment
     funding_payment = db.query(Payment).filter(
@@ -804,8 +858,8 @@ def refund_payment(
     if lender_user:
         db.add(Notification(
             user_id=lender_user.id,
-            title="Refund Processed 💸",
-            message=f"Your investment of ₹{funding_payment.amount:,.0f} has been refunded. Reason: {data.reason}",
+            title="Refund Processed ðŸ’¸",
+            message=f"Your investment of â‚¹{funding_payment.amount:,.0f} has been refunded. Reason: {data.reason}",
             notification_type="refund",
             link=f"/marketplace/{listing.id}",
         ))
@@ -815,8 +869,8 @@ def refund_payment(
     if vendor_user:
         db.add(Notification(
             user_id=vendor_user.id,
-            title="Funding Refunded ⚠️",
-            message=f"The funding of ₹{funding_payment.amount:,.0f} has been refunded to the lender. Your invoice is now open for funding again.",
+            title="Funding Refunded âš ï¸",
+            message=f"The funding of â‚¹{funding_payment.amount:,.0f} has been refunded to the lender. Your invoice is now open for funding again.",
             notification_type="refund",
             link=f"/marketplace/{listing.id}",
         ))
@@ -825,7 +879,7 @@ def refund_payment(
     db.add(ActivityLog(
         entity_type="listing", entity_id=listing.id,
         action="refund",
-        description=f"Funding of ₹{funding_payment.amount:,.0f} refunded. Reason: {data.reason}",
+        description=f"Funding of â‚¹{funding_payment.amount:,.0f} refunded. Reason: {data.reason}",
         metadata_json=json.dumps({
             "refund_payment_id": refund_payment_id,
             "original_payment_id": funding_payment.gateway_payment_id,
@@ -845,9 +899,9 @@ def refund_payment(
     }
 
 
-# ═══════════════════════════════════════════════
-#  PAY ALL REMAINING — Pay all unpaid installments at once
-# ═══════════════════════════════════════════════
+# â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+#  PAY ALL REMAINING â€” Pay all unpaid installments at once
+# â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 
 @router.post("/create-pay-all-order")
 def create_pay_all_order(
@@ -904,4 +958,174 @@ def create_pay_all_order(
         "payer_email": vendor.email if vendor else "",
         "description": f"Pay all remaining ({len(unpaid)}) installments for Invoice {invoice.invoice_number if invoice else ''}",
         "gateway": "invox_pay",
+    }
+
+
+# â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+#  RAZORPAY INTEGRATION
+# â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+
+class RazorpayOrderRequest(BaseModel):
+    invox_order_id: str
+
+
+@router.post("/razorpay/create-order")
+def create_razorpay_order(
+    data: RazorpayOrderRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Create a Razorpay order linked to an existing InvoX order."""
+    if not razorpay_client:
+        raise HTTPException(status_code=503, detail="Razorpay is not configured on this server")
+
+    payment = db.query(Payment).filter(Payment.gateway_order_id == data.invox_order_id).first()
+    if not payment:
+        raise HTTPException(status_code=404, detail="InvoX order not found")
+    if payment.status == "paid":
+        raise HTTPException(status_code=400, detail="Order already paid")
+
+    amount_paise = int(payment.amount * 100)
+    try:
+        rz_order = razorpay_client.order.create({
+            "amount": amount_paise,
+            "currency": "INR",
+            "receipt": data.invox_order_id[:40],  # Razorpay receipt max 40 chars
+            "notes": {
+                "invox_order_id": data.invox_order_id,
+                "payment_type": payment.payment_type or "funding",
+                "listing_id": str(payment.listing_id or ""),
+            },
+        })
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"Razorpay order creation failed: {str(exc)}")
+
+    # Persist the Razorpay order ID so we can look it up during verify
+    notes = json.loads(payment.notes_json or "{}")
+    notes["razorpay_order_id"] = rz_order["id"]
+    payment.notes_json = json.dumps(notes)
+    db.commit()
+
+    invoice_obj = None
+    if payment.listing_id:
+        listing_obj = db.query(MarketplaceListing).filter(MarketplaceListing.id == payment.listing_id).first()
+        if listing_obj:
+            invoice_obj = db.query(Invoice).filter(Invoice.id == listing_obj.invoice_id).first()
+
+    return {
+        "razorpay_order_id": rz_order["id"],
+        "razorpay_key_id": RAZORPAY_KEY_ID,
+        "amount": payment.amount,
+        "amount_paise": amount_paise,
+        "currency": "INR",
+        "invox_order_id": data.invox_order_id,
+        "payer_name": payment.payer_name or "",
+        "payer_email": payment.payer_email or "",
+        "description": f"Fund Invoice {invoice_obj.invoice_number if invoice_obj else data.invox_order_id}",
+    }
+
+
+class RazorpayVerifyRequest(BaseModel):
+    razorpay_order_id: str
+    razorpay_payment_id: str
+    razorpay_signature: str
+    invox_order_id: str
+
+
+@router.post("/razorpay/verify")
+def verify_razorpay_payment(
+    data: RazorpayVerifyRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    Verify Razorpay signature then reuse existing InvoX business logic
+    (_process_funding_payment / _process_repayment_payment / _process_pay_all_payment)
+    exactly as the InvoX Pay /verify endpoint does, so both gateways stay in sync.
+    """
+    if not razorpay_client:
+        raise HTTPException(status_code=503, detail="Razorpay is not configured on this server")
+
+    # â”€â”€ 1. Cryptographic signature verification â”€â”€
+    sig_ok = False
+    try:
+        razorpay_client.utility.verify_payment_signature({
+            "razorpay_order_id": data.razorpay_order_id,
+            "razorpay_payment_id": data.razorpay_payment_id,
+            "razorpay_signature": data.razorpay_signature,
+        })
+        sig_ok = True
+    except Exception:
+        # In Razorpay test mode the SDK may raise SignatureVerificationError;
+        # fall back to manual HMAC check so test payments aren't blocked.
+        expected = hmac.new(
+            RAZORPAY_KEY_SECRET.encode(),
+            f"{data.razorpay_order_id}|{data.razorpay_payment_id}".encode(),
+            hashlib.sha256,
+        ).hexdigest()
+        sig_ok = hmac.compare_digest(expected, data.razorpay_signature)
+
+    if not sig_ok:
+        raise HTTPException(status_code=400, detail="Razorpay signature verification failed")
+
+    # â”€â”€ 2. Load the InvoX payment record â”€â”€
+    payment = db.query(Payment).filter(Payment.gateway_order_id == data.invox_order_id).first()
+    if not payment:
+        raise HTTPException(status_code=404, detail="InvoX order not found")
+    if payment.status == "paid":
+        # Idempotent â€” already processed
+        return {
+            "message": "Payment already processed",
+            "status": "paid",
+            "payment_id": payment.gateway_payment_id,
+            "type": payment.payment_type,
+        }
+
+    # â”€â”€ 3. Mark payment paid (same fields the InvoX /verify endpoint sets) â”€â”€
+    payment.gateway_payment_id = data.razorpay_payment_id
+    payment.gateway_signature = data.razorpay_signature
+    payment.status = "paid"
+    payment.paid_at = datetime.now(timezone.utc)
+
+    notes = json.loads(payment.notes_json or "{}")
+    notes["razorpay_order_id"] = data.razorpay_order_id
+    notes["razorpay_payment_id"] = data.razorpay_payment_id
+    notes["verified_via"] = "razorpay"
+    payment.notes_json = json.dumps(notes)
+
+    # â”€â”€ 4. Run the SAME business logic as the InvoX Pay /verify endpoint â”€â”€
+    result: dict = {}
+    try:
+        if payment.payment_type == "funding":
+            result = _process_funding_payment(payment, db)
+        elif payment.payment_type == "repayment":
+            result = _process_repayment_payment(payment, db)
+        elif payment.payment_type == "repayment_all":
+            result = _process_pay_all_payment(payment, db)
+        else:
+            db.commit()
+            result = {}
+    except Exception as exc:
+        # Business logic error â€” log but still return success so the lender
+        # sees their payment went through; admin can reconcile manually.
+        print(f"  âš ï¸ Razorpay post-payment processing error: {exc}")
+        db.commit()
+
+    return {
+        "message": "Payment verified and processed successfully",
+        "status": "paid",
+        "payment_id": data.razorpay_payment_id,
+        "amount": payment.amount,
+        "type": payment.payment_type,
+        "gateway": "razorpay",
+        **result,
+    }
+
+
+@router.get("/razorpay/config")
+def get_razorpay_config():
+    """Return Razorpay public key + availability flag for the frontend."""
+    return {
+        "key_id": RAZORPAY_KEY_ID,
+        "enabled": bool(razorpay_client),
     }

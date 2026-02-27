@@ -78,9 +78,13 @@ function OTPContent() {
         router.push("/");
       }
     } catch (err: unknown) {
-      toast.error(getErrorMessage(err, "Invalid OTP"));
-      setOtp(["", "", "", "", "", ""]);
-      inputRefs.current[0]?.focus();
+      const msg = getErrorMessage(err, "Verification failed. Please try again.");
+      toast.error(msg);
+      // Only clear OTP inputs if it's an actual OTP error, not a server error
+      if (msg.toLowerCase().includes("otp") || msg.toLowerCase().includes("invalid")) {
+        setOtp(["", "", "", "", "", ""]);
+        inputRefs.current[0]?.focus();
+      }
     }
     setLoading(false);
   };

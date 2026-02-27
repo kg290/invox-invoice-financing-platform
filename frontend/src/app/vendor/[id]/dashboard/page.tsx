@@ -10,6 +10,7 @@ import {
   CheckCircle, Clock, Store, BarChart3, Receipt, Activity, Bell,
   Plus, Eye, Gauge, BadgeCheck, AlertTriangle, ShieldCheck,
   Briefcase, CreditCard, ArrowRight, Sparkles, Shield, RefreshCw,
+  ChevronDown, Lightbulb, Target,
 } from "lucide-react";
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
@@ -134,6 +135,7 @@ export default function VendorDashboard() {
               { label: "Dashboard", href: `/vendor/${vendorId}/dashboard`, active: true },
               { label: "Invoices", href: `/vendor/${vendorId}/invoices` },
               { label: "Repayments", href: `/vendor/${vendorId}/repayments` },
+              { label: "Messages", href: "/chat" },
               { label: "Marketplace", href: "/marketplace" },
               { label: "Profile", href: `/vendor/${vendorId}` },
             ].map((nav) => (
@@ -161,7 +163,7 @@ export default function VendorDashboard() {
         </div>
       </header>
 
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 space-y-6">
+      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6 space-y-4">
         {/* ─── Hero Welcome ─── */}
         <div className="relative bg-gradient-to-br from-indigo-600 via-violet-600 to-purple-700 rounded-2xl p-6 text-white overflow-hidden">
           {/* Pattern overlay */}
@@ -269,7 +271,7 @@ export default function VendorDashboard() {
         </div>
 
         {/* ─── Charts Row ─── */}
-        <div className="grid lg:grid-cols-3 gap-6">
+        <div className="grid lg:grid-cols-3 gap-4">
           {/* Monthly Trend — 2/3 */}
           <div className="lg:col-span-2 bg-white rounded-2xl border border-gray-100 p-6">
             <div className="flex items-center justify-between mb-5">
@@ -325,13 +327,13 @@ export default function VendorDashboard() {
         </div>
 
         {/* ─── Risk & Verification Row ─── */}
-        <div className="grid lg:grid-cols-2 gap-6">
-          {/* Risk Assessment */}
+        <div className="grid lg:grid-cols-2 gap-4">
+          {/* Risk Assessment with Breakdown */}
           <div className="bg-white rounded-2xl border border-gray-100 p-6">
             <h2 className="text-sm font-bold text-gray-900 flex items-center gap-2 mb-5">
               <Gauge className="w-4 h-4 text-indigo-500" /> Risk Assessment
             </h2>
-            <div className="flex items-start gap-6">
+            <div className="flex items-start gap-6 mb-4">
               {/* Risk gauge */}
               <div className="flex-shrink-0">
                 <div className="relative w-28 h-28">
@@ -347,31 +349,44 @@ export default function VendorDashboard() {
                   </div>
                 </div>
               </div>
-              <div className="flex-1 space-y-3">
-                <div className="flex items-center justify-between">
-                  <span className={`text-sm font-bold ${risk.color}`}>{risk.label} Risk</span>
-                </div>
-                <div className="space-y-2">
-                  {[
-                    { label: "CIBIL Score", value: `${data.vendor.cibil_score ?? "—"} (${cibil.grade})`, weight: "40%" },
-                    { label: "Profile Status", value: data.vendor.profile_status, weight: "10%" },
-                  ].map((f) => (
-                    <div key={f.label} className="flex items-center justify-between text-xs">
+              <div className="flex-1 space-y-2">
+                <span className={`text-sm font-bold ${risk.color}`}>{risk.label} Risk</span>
+                {/* Factor bars */}
+                {data.risk_breakdown?.factors?.map((f: { key: string; label: string; score: number; max: number; value: string }) => (
+                  <div key={f.key}>
+                    <div className="flex items-center justify-between text-[11px] mb-0.5">
                       <span className="text-gray-500">{f.label}</span>
-                      <div className="flex items-center gap-2">
-                        <span className="font-semibold text-gray-700 capitalize">{f.value}</span>
-                        <span className="text-[10px] text-gray-400">{f.weight}</span>
+                      <span className="font-semibold text-gray-700">{f.score}/{f.max}</span>
+                    </div>
+                    <div className="w-full h-1.5 bg-gray-100 rounded-full overflow-hidden">
+                      <div className={`h-full rounded-full transition-all duration-700 ${f.score >= f.max * 0.8 ? "bg-emerald-500" : f.score >= f.max * 0.5 ? "bg-amber-400" : "bg-red-400"}`}
+                        style={{ width: `${(f.score / f.max) * 100}%` }} />
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            {/* AI Tips to Improve */}
+            {data.risk_breakdown?.top_tips?.length > 0 && (
+              <div className="bg-gradient-to-r from-indigo-50 to-purple-50 rounded-xl p-4 border border-indigo-100">
+                <h3 className="text-[11px] font-bold text-indigo-800 flex items-center gap-1.5 mb-2">
+                  <Lightbulb className="w-3.5 h-3.5 text-amber-500" /> AI Tips to Improve Your Score
+                </h3>
+                <div className="space-y-2">
+                  {data.risk_breakdown.top_tips.map((tip: { factor: string; tip: string; potential_gain: number }, idx: number) => (
+                    <div key={idx} className="flex gap-2 text-[11px]">
+                      <Target className="w-3.5 h-3.5 text-indigo-500 mt-0.5 flex-shrink-0" />
+                      <div>
+                        <span className="font-semibold text-indigo-700">{tip.factor}</span>
+                        <span className="text-emerald-600 ml-1">(+{tip.potential_gain} pts)</span>
+                        <p className="text-gray-600 mt-0.5">{tip.tip}</p>
                       </div>
                     </div>
                   ))}
                 </div>
-                <div className="pt-2 border-t border-gray-100">
-                  <p className="text-[11px] text-gray-400 flex items-center gap-1">
-                    <Sparkles className="w-3 h-3" /> AI-computed composite score based on CIBIL, GST, age, financials & verification
-                  </p>
-                </div>
               </div>
-            </div>
+            )}
           </div>
 
           {/* Verification Status */}
@@ -413,7 +428,7 @@ export default function VendorDashboard() {
         </div>
 
         {/* ─── Activity & Notifications ─── */}
-        <div className="grid lg:grid-cols-3 gap-6">
+        <div className="grid lg:grid-cols-3 gap-4">
           {/* Recent Activity — 2/3 */}
           <div className="lg:col-span-2 bg-white rounded-2xl border border-gray-100 p-6">
             <h2 className="text-sm font-bold text-gray-900 flex items-center gap-2 mb-5">
@@ -494,7 +509,7 @@ export default function VendorDashboard() {
         </div>
 
         {/* ─── Quick Actions ─── */}
-        <div className="grid sm:grid-cols-2 lg:grid-cols-5 gap-4">
+        <div className="grid grid-cols-3 lg:grid-cols-5 gap-3">
           {[
             { icon: Plus, label: "Create Invoice", desc: "Generate a new GST invoice", href: `/vendor/${vendorId}/invoices/create`, gradient: "from-indigo-500 to-violet-600" },
             { icon: Eye, label: "View Invoices", desc: "Manage your invoices", href: `/vendor/${vendorId}/invoices`, gradient: "from-blue-500 to-cyan-600" },

@@ -84,6 +84,7 @@ export default function InvoXPayCheckout({ orderData, onSuccess, onFailure, onDi
 
   // Success data
   const [successData, setSuccessData] = useState<Record<string, unknown>>({});
+  const [razorpayLoading, setRazorpayLoading] = useState(false);
 
   useEffect(() => {
     if (step === "processing") {
@@ -142,6 +143,67 @@ export default function InvoXPayCheckout({ orderData, onSuccess, onFailure, onDi
       const msg = getErrorMessage(err, "Payment processing failed");
       setError(msg);
       setStep("failure");
+    }
+  };
+
+  const payWithRazorpay = async () => {
+    setRazorpayLoading(true);
+    setError("");
+    try {
+      // 1. Create Razorpay order via our backend
+      const rzRes = await api.post("/payments/razorpay/create-order", {
+        invox_order_id: orderData.order_id,
+      });
+      const rzData = rzRes.data;
+
+      // 2. Open Razorpay checkout
+      const win = window as unknown as { Razorpay?: new (opts: Record<string, unknown>) => { open: () => void } };
+      if (!win.Razorpay) {
+        setError("Razorpay SDK not loaded. Please refresh and try again.");
+        setRazorpayLoading(false);
+        return;
+      }
+
+      const rzp = new win.Razorpay({
+        key: rzData.razorpay_key_id,
+        amount: rzData.amount_paise,
+        currency: rzData.currency,
+        name: "InvoX",
+        description: rzData.description,
+        order_id: rzData.razorpay_order_id,
+        prefill: {
+          name: rzData.payer_name || orderData.payer_name || "",
+          email: rzData.payer_email || orderData.payer_email || "",
+        },
+        theme: { color: "#4f46e5" },
+        handler: async (response: { razorpay_order_id: string; razorpay_payment_id: string; razorpay_signature: string }) => {
+          // 3. Verify on our backend
+          try {
+            const verifyRes = await api.post("/payments/razorpay/verify", {
+              razorpay_order_id: response.razorpay_order_id,
+              razorpay_payment_id: response.razorpay_payment_id,
+              razorpay_signature: response.razorpay_signature,
+              invox_order_id: orderData.order_id,
+            });
+            setSuccessData(verifyRes.data);
+            setStep("success");
+            setTimeout(() => onSuccess(verifyRes.data), 2000);
+          } catch (verifyErr: unknown) {
+            setError(getErrorMessage(verifyErr, "Razorpay verification failed"));
+            setStep("failure");
+          }
+        },
+        modal: {
+          ondismiss: () => {
+            setRazorpayLoading(false);
+          },
+        },
+      });
+      rzp.open();
+      setRazorpayLoading(false);
+    } catch (err: unknown) {
+      setError(getErrorMessage(err, "Failed to create Razorpay order"));
+      setRazorpayLoading(false);
     }
   };
 
@@ -218,6 +280,29 @@ export default function InvoXPayCheckout({ orderData, onSuccess, onFailure, onDi
             <>
               {step === "method" && (
                 <div className="space-y-2.5 mb-5">
+                  {/* ── Razorpay Primary Option ── */}
+                  <button onClick={payWithRazorpay} disabled={razorpayLoading}
+                    className="w-full flex items-center gap-4 p-4 border-2 border-indigo-200 bg-indigo-50 rounded-2xl hover:border-indigo-400 hover:bg-indigo-100/80 transition-all group">
+                    <div className="w-12 h-12 bg-gradient-to-br from-indigo-600 to-blue-700 rounded-xl flex items-center justify-center shadow-lg shadow-indigo-200/50">
+                      <svg viewBox="0 0 24 24" fill="white" className="w-6 h-6"><path d="M7.076 2L4 12.68l2.868-.404L10.14 2H7.076zm4.26 0L6.78 14.902l3.022-.425L14.636 2h-3.3zm4.122 0l-4.44 13.283L14.04 14.8 18.458 2h-3z"/></svg>
+                    </div>
+                    <div className="flex-1 text-left">
+                      <p className="text-sm font-bold text-gray-900">Pay with Razorpay</p>
+                      <p className="text-[11px] text-gray-500">UPI, Cards, Net Banking, Wallets</p>
+                    </div>
+                    {razorpayLoading ? (
+                      <Loader2 className="w-4 h-4 animate-spin text-indigo-500" />
+                    ) : (
+                      <span className="text-[10px] bg-indigo-600 text-white px-2 py-0.5 rounded-full font-bold">RECOMMENDED</span>
+                    )}
+                  </button>
+
+                  <div className="flex items-center gap-3 my-2">
+                    <div className="flex-1 border-t border-gray-200" />
+                    <span className="text-[10px] text-gray-400 font-medium uppercase">or pay via InvoX Pay</span>
+                    <div className="flex-1 border-t border-gray-200" />
+                  </div>
+
                   <p className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-3">Select Payment Method</p>
 
                   {/* Card */}
@@ -489,7 +574,7 @@ export default function InvoXPayCheckout({ orderData, onSuccess, onFailure, onDi
               <span>256-bit SSL</span>
             </div>
             <span>•</span>
-            <span className="font-semibold text-indigo-500">InvoX Pay</span>
+            <span className="font-semibold text-indigo-500">Razorpay + InvoX Pay</span>
           </div>
         </div>
       </div>
