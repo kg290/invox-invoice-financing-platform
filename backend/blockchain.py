@@ -28,9 +28,7 @@ BLOCK_SIGNING_KEY = os.getenv("BLOCK_SIGNING_KEY", "invox_chain_sign_k9x2m7p4q1w
 ENCRYPTION_KEY = os.getenv("ENCRYPTION_KEY", "invox_encrypt_a5b3c8d2e7f1g4h6")
 
 
-# ═══════════════════════════════════════════════
-#  CRYPTOGRAPHIC HELPERS
-# ═══════════════════════════════════════════════
+
 
 def _compute_hash(index: int, timestamp: str, data_hash: str, data_summary: str,
                   previous_hash: str, nonce: int, merkle_root: str = "") -> str:
@@ -114,9 +112,7 @@ def _compute_merkle_root(data_fields: list[str]) -> str:
     return leaves[0]
 
 
-# ═══════════════════════════════════════════════
-#  BLOCK OPERATIONS
-# ═══════════════════════════════════════════════
+
 
 def get_latest_block(db: Session) -> BlockchainBlock | None:
     return db.query(BlockchainBlock).order_by(BlockchainBlock.block_index.desc()).first()
@@ -196,7 +192,6 @@ def validate_chain(db: Session) -> dict:
     prefix = "0" * DIFFICULTY
 
     for i, block in enumerate(blocks):
-        # 1. Recompute hash
         ts = block.timestamp.isoformat() if block.timestamp else ""
         merkle = block.merkle_root or ""
         expected = _compute_hash(
@@ -207,18 +202,15 @@ def validate_chain(db: Session) -> dict:
             errors.append(f"Block #{block.block_index}: HASH MISMATCH — possible tampering detected!")
             tampered_blocks.append(block.block_index)
 
-        # 2. Check chain linkage
         if i > 0 and block.previous_hash != blocks[i - 1].block_hash:
             errors.append(f"Block #{block.block_index}: BROKEN CHAIN LINK — block re-ordering detected!")
             tampered_blocks.append(block.block_index)
 
-        # 3. Verify proof-of-work
         if block.block_hash.startswith(prefix):
             pow_verified += 1
         else:
             errors.append(f"Block #{block.block_index}: INVALID PROOF-OF-WORK — insufficient difficulty!")
 
-        # 4. Verify digital signature
         if block.digital_signature:
             if _verify_signature(block.block_hash, block.digital_signature):
                 signature_verified += 1

@@ -22,7 +22,7 @@ export default function ProtectedRoute({ children, allowedRoles }: ProtectedRout
     }
 
     if (allowedRoles && !allowedRoles.includes(user.role)) {
-      // Redirect to their own dashboard based on role
+      
       if (user.role === "vendor" && user.vendor_id) {
         router.replace(`/vendor/${user.vendor_id}/dashboard`);
       } else if (user.role === "lender" && user.lender_id) {
