@@ -6,11 +6,11 @@ import { useParams } from "next/navigation";
 import Link from "next/link";
 import { toast } from "sonner";
 import {
-  FileText, Loader2, IndianRupee, TrendingUp, AlertCircle,
-  CheckCircle, Clock, Store, BarChart3, Receipt, Activity, Bell,
-  Plus, Eye, Gauge, BadgeCheck, AlertTriangle, ShieldCheck,
-  Briefcase, CreditCard, ArrowRight, Sparkles, Shield, RefreshCw,
-  ChevronDown, Lightbulb, Target,
+  FileText, Loader2, IndianRupee, TrendingUp, AlertCircle, AlertTriangle,
+  CheckCircle, Clock, Store, BarChart3, Receipt, Activity, Bell, Upload,
+  Plus, Eye, BadgeCheck, ShieldCheck,
+  Briefcase, CreditCard, ArrowRight, Sparkles, RefreshCw,
+  Building2, Users, Percent,
 } from "lucide-react";
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
@@ -21,22 +21,87 @@ import { VendorDashboardData, NotificationItem } from "@/lib/types";
 
 const PIE_COLORS = ["#6366f1", "#22c55e", "#f59e0b", "#ef4444", "#8b5cf6", "#64748b"];
 
-const riskMeter = (score: number | null) => {
-  const s = score ?? 50;
-  if (s <= 25) return { label: "Very Low", color: "text-emerald-600", bg: "bg-emerald-500", fill: "from-emerald-400 to-emerald-600" };
-  if (s <= 40) return { label: "Low", color: "text-green-600", bg: "bg-green-500", fill: "from-green-400 to-green-600" };
-  if (s <= 55) return { label: "Moderate", color: "text-yellow-600", bg: "bg-yellow-500", fill: "from-yellow-400 to-yellow-600" };
-  if (s <= 70) return { label: "High", color: "text-orange-600", bg: "bg-orange-500", fill: "from-orange-400 to-orange-600" };
-  return { label: "Very High", color: "text-red-600", bg: "bg-red-500", fill: "from-red-400 to-red-600" };
-};
+// ─── Post-login Document Verification Banner ───
+const POST_LOGIN_DOCS = [
+  { key: "bank_statement", label: "Bank Statement (6 months)", vendorKey: "bank_statement_doc" },
+  { key: "registration_certificate", label: "Registration Certificate", vendorKey: "registration_certificate_doc" },
+];
 
-const cibilGrade = (score: number | null) => {
-  if (!score) return { grade: "N/A", color: "text-gray-400", bg: "bg-gray-100" };
-  if (score >= 750) return { grade: "Excellent", color: "text-emerald-700", bg: "bg-emerald-50" };
-  if (score >= 700) return { grade: "Good", color: "text-green-700", bg: "bg-green-50" };
-  if (score >= 650) return { grade: "Fair", color: "text-yellow-700", bg: "bg-yellow-50" };
-  return { grade: "Poor", color: "text-red-700", bg: "bg-red-50" };
-};
+function DocumentVerificationBanner({ vendorId }: { vendorId: string }) {
+  const [vendor, setVendor] = useState<Record<string, unknown> | null>(null);
+  const [uploading, setUploading] = useState<string | null>(null);
+  const [dismissed, setDismissed] = useState(false);
+
+  useEffect(() => {
+    api.get(`/vendors/${vendorId}`).then(r => setVendor(r.data)).catch(() => {});
+  }, [vendorId]);
+
+  if (!vendor || dismissed) return null;
+
+  const missingDocs = POST_LOGIN_DOCS.filter(d => !vendor[d.vendorKey]);
+  if (missingDocs.length === 0) return null;
+
+  const handleUpload = async (docType: string, file: File) => {
+    setUploading(docType);
+    const storedUser = localStorage.getItem("invox_user");
+    const email = storedUser ? JSON.parse(storedUser).email : "";
+    const formData = new FormData();
+    formData.append("file", file);
+    formData.append("email", email);
+    formData.append("doc_type", docType);
+    formData.append("stage", "post_login");
+    try {
+      await api.post("/auth/upload-document", formData, {
+        headers: { "Content-Type": "multipart/form-data" },
+      });
+      toast.success(`${docType.replace("_", " ")} uploaded!`);
+      // Refresh vendor data
+      const r = await api.get(`/vendors/${vendorId}`);
+      setVendor(r.data);
+    } catch {
+      toast.error("Upload failed");
+    } finally {
+      setUploading(null);
+    }
+  };
+
+  return (
+    <div className="bg-amber-50 border border-amber-200 rounded-2xl p-5">
+      <div className="flex items-start justify-between">
+        <div className="flex items-center gap-3">
+          <div className="w-10 h-10 bg-amber-100 rounded-xl flex items-center justify-center">
+            <ShieldCheck className="w-5 h-5 text-amber-600" />
+          </div>
+          <div>
+            <h3 className="text-sm font-semibold text-amber-800">Complete Your Verification</h3>
+            <p className="text-xs text-amber-600 mt-0.5">
+              Upload the remaining documents to fully verify your account and unlock all features.
+            </p>
+          </div>
+        </div>
+        <button onClick={() => setDismissed(true)} className="text-amber-400 hover:text-amber-600 text-xs">Dismiss</button>
+      </div>
+      <div className="mt-4 space-y-2">
+        {missingDocs.map(doc => (
+          <div key={doc.key} className="flex items-center justify-between p-3 bg-white rounded-xl border border-amber-100">
+            <div className="flex items-center gap-2">
+              <AlertTriangle className="w-4 h-4 text-amber-500" />
+              <span className="text-sm text-gray-700 font-medium">{doc.label}</span>
+            </div>
+            <label className="cursor-pointer">
+              <input type="file" className="hidden" accept=".pdf,.jpg,.jpeg,.png"
+                onChange={(e) => { const f = e.target.files?.[0]; if (f) handleUpload(doc.key, f); }} />
+              <span className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-amber-100 text-amber-700 rounded-lg text-xs font-semibold hover:bg-amber-200 transition-colors">
+                {uploading === doc.key ? <Loader2 className="w-3 h-3 animate-spin" /> : <Upload className="w-3 h-3" />}
+                Upload Now
+              </span>
+            </label>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
 
 export default function VendorDashboard() {
   const params = useParams();
@@ -45,6 +110,7 @@ export default function VendorDashboard() {
   const [notifs, setNotifs] = useState<NotificationItem[]>([]);
   const [unread, setUnread] = useState(0);
   const [loading, setLoading] = useState(true);
+  const [showNotifs, setShowNotifs] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const fetchDashboard = () => {
@@ -104,13 +170,6 @@ export default function VendorDashboard() {
     value,
   }));
 
-  const verifPct = data.verification.total_checks > 0
-    ? Math.round((data.verification.passed / data.verification.total_checks) * 100)
-    : 0;
-
-  const risk = riskMeter(data.vendor.risk_score);
-  const cibil = cibilGrade(data.vendor.cibil_score);
-
   const greeting = () => {
     const h = new Date().getHours();
     if (h < 12) return "Good morning";
@@ -150,12 +209,41 @@ export default function VendorDashboard() {
             ))}
           </nav>
           <div className="flex items-center gap-3">
-            <button className="relative p-2 hover:bg-gray-50 rounded-xl transition-colors">
-              <Bell className="w-5 h-5 text-gray-400" />
-              {unread > 0 && (
-                <span className="absolute top-1 right-1 w-4 h-4 bg-red-500 text-white rounded-full text-[9px] flex items-center justify-center font-bold">{unread}</span>
+            <div className="relative">
+              <button onClick={() => setShowNotifs(!showNotifs)} className="relative p-2 hover:bg-gray-50 rounded-xl transition-colors">
+                <Bell className="w-5 h-5 text-gray-400" />
+                {unread > 0 && (
+                  <span className="absolute top-1 right-1 w-4 h-4 bg-red-500 text-white rounded-full text-[9px] flex items-center justify-center font-bold">{unread}</span>
+                )}
+              </button>
+              {showNotifs && (
+                <div className="absolute right-0 top-full mt-2 w-80 bg-white rounded-2xl shadow-2xl border border-gray-100 z-[100] overflow-hidden">
+                  <div className="px-4 py-3 border-b border-gray-100 flex items-center justify-between">
+                    <h3 className="text-sm font-bold text-gray-900">Notifications</h3>
+                    {unread > 0 && <span className="px-2 py-0.5 bg-red-50 text-red-600 rounded-lg text-[10px] font-semibold">{unread} new</span>}
+                  </div>
+                  <div className="max-h-80 overflow-y-auto">
+                    {notifs.length > 0 ? notifs.slice(0, 8).map((n) => (
+                      <div key={n.id} className={`px-4 py-3 border-b border-gray-50 last:border-0 hover:bg-gray-50 transition-colors ${!n.is_read ? "bg-indigo-50/40" : ""}`}>
+                        <div className="flex items-start gap-2">
+                          <div className={`w-2 h-2 rounded-full mt-1.5 flex-shrink-0 ${n.is_read ? "bg-gray-300" : "bg-indigo-500"}`} />
+                          <div className="min-w-0">
+                            <p className="text-xs font-semibold text-gray-800 truncate">{n.title}</p>
+                            <p className="text-[11px] text-gray-500 mt-0.5 line-clamp-2">{n.message}</p>
+                            {n.created_at && <p className="text-[10px] text-gray-400 mt-1">{new Date(n.created_at).toLocaleString("en-IN")}</p>}
+                          </div>
+                        </div>
+                      </div>
+                    )) : (
+                      <div className="text-center py-8">
+                        <Bell className="w-6 h-6 text-gray-200 mx-auto mb-2" />
+                        <p className="text-xs text-gray-400">No notifications yet</p>
+                      </div>
+                    )}
+                  </div>
+                </div>
               )}
-            </button>
+            </div>
             <div className="w-8 h-8 bg-gradient-to-br from-indigo-500 to-purple-600 rounded-full flex items-center justify-center">
               <span className="text-white text-xs font-bold">{data.vendor.name.charAt(0)}</span>
             </div>
@@ -200,14 +288,9 @@ export default function VendorDashboard() {
             {/* Hero stats row */}
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 mt-4">
               <div className="bg-white/10 backdrop-blur-sm border border-white/10 rounded-2xl p-4">
-                <p className="text-indigo-200 text-[11px] uppercase tracking-wider font-medium mb-1">CIBIL Score</p>
-                <p className="text-2xl font-bold">{data.vendor.cibil_score ?? "—"}</p>
-                <p className="text-indigo-300 text-[10px] mt-0.5">{cibil.grade}</p>
-              </div>
-              <div className="bg-white/10 backdrop-blur-sm border border-white/10 rounded-2xl p-4">
-                <p className="text-indigo-200 text-[11px] uppercase tracking-wider font-medium mb-1">Risk Score</p>
-                <p className="text-2xl font-bold">{data.vendor.risk_score ?? "—"}<span className="text-sm font-normal text-indigo-300">/100</span></p>
-                <p className="text-indigo-300 text-[10px] mt-0.5">{risk.label}</p>
+                <p className="text-indigo-200 text-[11px] uppercase tracking-wider font-medium mb-1">Total Invoices</p>
+                <p className="text-2xl font-bold">{data.invoices.total}</p>
+                <p className="text-indigo-300 text-[10px] mt-0.5">₹{data.invoices.total_value.toLocaleString("en-IN")} value</p>
               </div>
               <div className="bg-white/10 backdrop-blur-sm border border-white/10 rounded-2xl p-4">
                 <p className="text-indigo-200 text-[11px] uppercase tracking-wider font-medium mb-1">Total Funded</p>
@@ -215,13 +298,21 @@ export default function VendorDashboard() {
                 <p className="text-indigo-300 text-[10px] mt-0.5">{data.marketplace.funded_count} deals</p>
               </div>
               <div className="bg-white/10 backdrop-blur-sm border border-white/10 rounded-2xl p-4">
-                <p className="text-indigo-200 text-[11px] uppercase tracking-wider font-medium mb-1">Verification</p>
-                <p className="text-2xl font-bold">{verifPct}%</p>
-                <p className="text-indigo-300 text-[10px] mt-0.5">{data.verification.passed}/{data.verification.total_checks} passed</p>
+                <p className="text-indigo-200 text-[11px] uppercase tracking-wider font-medium mb-1">Marketplace</p>
+                <p className="text-2xl font-bold">{data.marketplace.total_listings}</p>
+                <p className="text-indigo-300 text-[10px] mt-0.5">{data.marketplace.open} open listings</p>
+              </div>
+              <div className="bg-white/10 backdrop-blur-sm border border-white/10 rounded-2xl p-4">
+                <p className="text-indigo-200 text-[11px] uppercase tracking-wider font-medium mb-1">Repayments</p>
+                <p className="text-2xl font-bold">₹{(data.repayment.paid_amount / 1000).toFixed(0)}K</p>
+                <p className="text-indigo-300 text-[10px] mt-0.5">₹{(data.repayment.pending_amount / 1000).toFixed(0)}K pending</p>
               </div>
             </div>
           </div>
         </div>
+
+        {/* ─── Document Verification Banner ─── */}
+        <DocumentVerificationBanner vendorId={vendorId} />
 
         {/* ─── KPI Cards ─── */}
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
@@ -326,111 +417,11 @@ export default function VendorDashboard() {
           </div>
         </div>
 
-        {/* ─── Risk & Verification Row ─── */}
-        <div className="grid lg:grid-cols-2 gap-4">
-          {/* Risk Assessment with Breakdown */}
+
+
+        {/* ─── Recent Activity ─── */}
+        <div className="grid grid-cols-1 gap-4">
           <div className="bg-white rounded-2xl border border-gray-100 p-6">
-            <h2 className="text-sm font-bold text-gray-900 flex items-center gap-2 mb-5">
-              <Gauge className="w-4 h-4 text-indigo-500" /> Risk Assessment
-            </h2>
-            <div className="flex items-start gap-6 mb-4">
-              {/* Risk gauge */}
-              <div className="flex-shrink-0">
-                <div className="relative w-28 h-28">
-                  <svg className="w-28 h-28 -rotate-90" viewBox="0 0 36 36">
-                    <circle cx="18" cy="18" r="14" fill="none" stroke="#f1f5f9" strokeWidth="4" />
-                    <circle cx="18" cy="18" r="14" fill="none" strokeWidth="4" strokeLinecap="round"
-                      className={`${risk.bg.replace("bg-", "stroke-")}`}
-                      strokeDasharray={`${(data.vendor.risk_score ?? 50) * 0.88} ${88 - (data.vendor.risk_score ?? 50) * 0.88}`} />
-                  </svg>
-                  <div className="absolute inset-0 flex flex-col items-center justify-center">
-                    <span className={`text-2xl font-bold ${risk.color}`}>{data.vendor.risk_score ?? "—"}</span>
-                    <span className="text-[9px] text-gray-400">/100</span>
-                  </div>
-                </div>
-              </div>
-              <div className="flex-1 space-y-2">
-                <span className={`text-sm font-bold ${risk.color}`}>{risk.label} Risk</span>
-                {/* Factor bars */}
-                {data.risk_breakdown?.factors?.map((f: { key: string; label: string; score: number; max: number; value: string }) => (
-                  <div key={f.key}>
-                    <div className="flex items-center justify-between text-[11px] mb-0.5">
-                      <span className="text-gray-500">{f.label}</span>
-                      <span className="font-semibold text-gray-700">{f.score}/{f.max}</span>
-                    </div>
-                    <div className="w-full h-1.5 bg-gray-100 rounded-full overflow-hidden">
-                      <div className={`h-full rounded-full transition-all duration-700 ${f.score >= f.max * 0.8 ? "bg-emerald-500" : f.score >= f.max * 0.5 ? "bg-amber-400" : "bg-red-400"}`}
-                        style={{ width: `${(f.score / f.max) * 100}%` }} />
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </div>
-
-            {/* AI Tips to Improve */}
-            {data.risk_breakdown?.top_tips?.length > 0 && (
-              <div className="bg-gradient-to-r from-indigo-50 to-purple-50 rounded-xl p-4 border border-indigo-100">
-                <h3 className="text-[11px] font-bold text-indigo-800 flex items-center gap-1.5 mb-2">
-                  <Lightbulb className="w-3.5 h-3.5 text-amber-500" /> AI Tips to Improve Your Score
-                </h3>
-                <div className="space-y-2">
-                  {data.risk_breakdown.top_tips.map((tip: { factor: string; tip: string; potential_gain: number }, idx: number) => (
-                    <div key={idx} className="flex gap-2 text-[11px]">
-                      <Target className="w-3.5 h-3.5 text-indigo-500 mt-0.5 flex-shrink-0" />
-                      <div>
-                        <span className="font-semibold text-indigo-700">{tip.factor}</span>
-                        <span className="text-emerald-600 ml-1">(+{tip.potential_gain} pts)</span>
-                        <p className="text-gray-600 mt-0.5">{tip.tip}</p>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
-          </div>
-
-          {/* Verification Status */}
-          <div className="bg-white rounded-2xl border border-gray-100 p-6">
-            <div className="flex items-center justify-between mb-5">
-              <h2 className="text-sm font-bold text-gray-900 flex items-center gap-2">
-                <Shield className="w-4 h-4 text-emerald-500" /> Verification Status
-              </h2>
-              <span className="text-[11px] text-gray-400 font-medium">Auto-verified</span>
-            </div>
-            <div className="flex items-center gap-6">
-              <div className="relative w-28 h-28 flex-shrink-0">
-                <svg className="w-28 h-28 -rotate-90" viewBox="0 0 36 36">
-                  <circle cx="18" cy="18" r="14" fill="none" stroke="#f1f5f9" strokeWidth="4" />
-                  <circle cx="18" cy="18" r="14" fill="none" stroke="#22c55e" strokeWidth="4"
-                    strokeDasharray={`${verifPct * 0.88} ${88 - verifPct * 0.88}`} strokeLinecap="round" />
-                </svg>
-                <span className="absolute inset-0 flex flex-col items-center justify-center">
-                  <span className="text-2xl font-bold text-gray-900">{verifPct}%</span>
-                  <span className="text-[9px] text-gray-400">passed</span>
-                </span>
-              </div>
-              <div className="flex-1 grid grid-cols-2 gap-2">
-                {[
-                  { icon: CheckCircle, label: "Passed", count: data.verification.passed, color: "text-emerald-600", bg: "bg-emerald-50" },
-                  { icon: AlertCircle, label: "Failed", count: data.verification.failed, color: "text-red-600", bg: "bg-red-50" },
-                  { icon: AlertTriangle, label: "Warnings", count: data.verification.warning, color: "text-yellow-600", bg: "bg-yellow-50" },
-                  { icon: Clock, label: "Pending", count: data.verification.pending, color: "text-gray-500", bg: "bg-gray-50" },
-                ].map((item) => (
-                  <div key={item.label} className={`${item.bg} rounded-xl p-3 text-center`}>
-                    <item.icon className={`w-4 h-4 ${item.color} mx-auto mb-1`} />
-                    <p className={`text-lg font-bold ${item.color}`}>{item.count}</p>
-                    <p className="text-[10px] text-gray-500">{item.label}</p>
-                  </div>
-                ))}
-              </div>
-            </div>
-          </div>
-        </div>
-
-        {/* ─── Activity & Notifications ─── */}
-        <div className="grid lg:grid-cols-3 gap-4">
-          {/* Recent Activity — 2/3 */}
-          <div className="lg:col-span-2 bg-white rounded-2xl border border-gray-100 p-6">
             <h2 className="text-sm font-bold text-gray-900 flex items-center gap-2 mb-5">
               <Activity className="w-4 h-4 text-indigo-500" /> Recent Activity
             </h2>
@@ -468,41 +459,6 @@ export default function VendorDashboard() {
                 <Activity className="w-8 h-8 text-gray-200 mx-auto mb-2" />
                 <p className="text-sm text-gray-400">No recent activity</p>
                 <p className="text-[11px] text-gray-300 mt-1">Activity will appear here as you use InvoX</p>
-              </div>
-            )}
-          </div>
-
-          {/* Notifications — 1/3 */}
-          <div className="bg-white rounded-2xl border border-gray-100 p-6">
-            <div className="flex items-center justify-between mb-5">
-              <h2 className="text-sm font-bold text-gray-900 flex items-center gap-2">
-                <Bell className="w-4 h-4 text-red-500" /> Notifications
-              </h2>
-              {unread > 0 && (
-                <span className="px-2 py-0.5 bg-red-50 text-red-600 rounded-lg text-[10px] font-semibold">{unread} new</span>
-              )}
-            </div>
-            {notifs.length > 0 ? (
-              <div className="space-y-2 max-h-[300px] overflow-y-auto">
-                {notifs.slice(0, 8).map((n) => (
-                  <div key={n.id} className={`p-3 rounded-xl border transition-colors ${
-                    n.is_read ? "bg-white border-gray-100" : "bg-indigo-50/50 border-indigo-100"
-                  }`}>
-                    <div className="flex items-start gap-2">
-                      <div className={`w-2 h-2 rounded-full mt-1.5 flex-shrink-0 ${n.is_read ? "bg-gray-300" : "bg-indigo-500"}`} />
-                      <div className="min-w-0">
-                        <p className="text-xs font-semibold text-gray-800 truncate">{n.title}</p>
-                        <p className="text-[11px] text-gray-500 mt-0.5 line-clamp-2">{n.message}</p>
-                        {n.created_at && <p className="text-[10px] text-gray-400 mt-1">{new Date(n.created_at).toLocaleString("en-IN")}</p>}
-                      </div>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            ) : (
-              <div className="text-center py-6">
-                <Bell className="w-8 h-8 text-gray-200 mx-auto mb-2" />
-                <p className="text-sm text-gray-400">No notifications</p>
               </div>
             )}
           </div>

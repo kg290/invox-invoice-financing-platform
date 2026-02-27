@@ -1,4 +1,4 @@
-"""
+﻿"""
 Smart Contract PDF generator.
 Generates a comprehensive settlement contract PDF with all transaction details.
 """
@@ -64,9 +64,9 @@ def generate_smart_contract_pdf(
 
     elements = []
 
-    # ══════════════════════════════════════════
+    # â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
     #  HEADER & TITLE
-    # ══════════════════════════════════════════
+    # â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
     elements.append(Spacer(1, 2 * mm))
     elements.append(HRFlowable(width="100%", thickness=2, color=colors.HexColor("#1e40af")))
     elements.append(Spacer(1, 4 * mm))
@@ -87,13 +87,13 @@ def generate_smart_contract_pdf(
         "#3b82f6" if listing.listing_status == "funded" else "#f59e0b"
     )
     elements.append(Paragraph(
-        f'<font color="{status_color}" size="12"><b>● CONTRACT STATUS: {status_label}</b></font>',
+        f'<font color="{status_color}" size="12"><b>â— CONTRACT STATUS: {status_label}</b></font>',
         ParagraphStyle("StatusBanner", parent=bold, alignment=TA_CENTER, spaceBefore=2 * mm, spaceAfter=4 * mm),
     ))
 
-    # ══════════════════════════════════════════
+    # â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
     #  1. PARTIES INVOLVED
-    # ══════════════════════════════════════════
+    # â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
     elements.append(Paragraph("1. PARTIES INVOLVED", section_style))
 
     parties_data = [
@@ -102,7 +102,7 @@ def generate_smart_contract_pdf(
             Paragraph(
                 f"<b>Name:</b> {vendor.full_name}<br/>"
                 f"<b>Business:</b> {vendor.business_name}<br/>"
-                f"<b>Type:</b> {vendor.business_type} — {vendor.business_category}<br/>"
+                f"<b>Type:</b> {vendor.business_type} â€” {vendor.business_category}<br/>"
                 f"<b>GSTIN:</b> {vendor.gstin}<br/>"
                 f"<b>PAN:</b> {vendor.personal_pan}<br/>"
                 f"<b>Address:</b> {vendor.business_address}, {vendor.business_city}, "
@@ -110,7 +110,7 @@ def generate_smart_contract_pdf(
                 f"<b>Phone:</b> {vendor.phone}<br/>"
                 f"<b>Email:</b> {vendor.email}<br/>"
                 f"<b>CIBIL Score:</b> {vendor.cibil_score}<br/>"
-                f"<b>Annual Turnover:</b> ₹{vendor.annual_turnover:,.2f}",
+                f"<b>Annual Turnover:</b> â‚¹{vendor.annual_turnover:,.2f}",
                 small,
             ),
             Paragraph(
@@ -134,9 +134,9 @@ def generate_smart_contract_pdf(
     ]))
     elements.append(parties_table)
 
-    # ══════════════════════════════════════════
+    # â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
     #  2. INVOICE DETAILS
-    # ══════════════════════════════════════════
+    # â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
     elements.append(Paragraph("2. INVOICE DETAILS", section_style))
 
     inv_info = [
@@ -176,18 +176,18 @@ def generate_smart_contract_pdf(
         if is_intra:
             item_rows.append([
                 str(idx), item.description, item.hsn_sac_code,
-                f"{item.quantity} {item.unit}", f"₹{item.unit_price:,.2f}",
-                f"₹{item.taxable_value:,.2f}",
-                f"₹{item.cgst_amount:,.2f}", f"₹{item.sgst_amount:,.2f}",
-                f"₹{item.total_amount:,.2f}",
+                f"{item.quantity} {item.unit}", f"â‚¹{item.unit_price:,.2f}",
+                f"â‚¹{item.taxable_value:,.2f}",
+                f"â‚¹{item.cgst_amount:,.2f}", f"â‚¹{item.sgst_amount:,.2f}",
+                f"â‚¹{item.total_amount:,.2f}",
             ])
         else:
             item_rows.append([
                 str(idx), item.description, item.hsn_sac_code,
-                f"{item.quantity} {item.unit}", f"₹{item.unit_price:,.2f}",
-                f"₹{item.taxable_value:,.2f}",
-                f"₹{item.igst_amount:,.2f}",
-                f"₹{item.total_amount:,.2f}",
+                f"{item.quantity} {item.unit}", f"â‚¹{item.unit_price:,.2f}",
+                f"â‚¹{item.taxable_value:,.2f}",
+                f"â‚¹{item.igst_amount:,.2f}",
+                f"â‚¹{item.total_amount:,.2f}",
             ])
 
     if is_intra:
@@ -213,18 +213,18 @@ def generate_smart_contract_pdf(
     # Totals
     elements.append(Paragraph("2.2 Invoice Totals", subsection_style))
     totals = [
-        ["Subtotal", f"₹{invoice.subtotal:,.2f}"],
+        ["Subtotal", f"â‚¹{invoice.subtotal:,.2f}"],
     ]
     if invoice.total_discount > 0:
-        totals.append(["Discount", f"-₹{invoice.total_discount:,.2f}"])
+        totals.append(["Discount", f"-â‚¹{invoice.total_discount:,.2f}"])
     if is_intra:
-        totals.append(["CGST", f"₹{invoice.total_cgst:,.2f}"])
-        totals.append(["SGST", f"₹{invoice.total_sgst:,.2f}"])
+        totals.append(["CGST", f"â‚¹{invoice.total_cgst:,.2f}"])
+        totals.append(["SGST", f"â‚¹{invoice.total_sgst:,.2f}"])
     else:
-        totals.append(["IGST", f"₹{invoice.total_igst:,.2f}"])
+        totals.append(["IGST", f"â‚¹{invoice.total_igst:,.2f}"])
     if invoice.total_cess > 0:
-        totals.append(["Cess", f"₹{invoice.total_cess:,.2f}"])
-    totals.append(["GRAND TOTAL", f"₹{invoice.grand_total:,.2f}"])
+        totals.append(["Cess", f"â‚¹{invoice.total_cess:,.2f}"])
+    totals.append(["GRAND TOTAL", f"â‚¹{invoice.grand_total:,.2f}"])
 
     totals_table = Table(
         [[Paragraph(f"<b>{k}</b>", small), Paragraph(f"<b>{v}</b>" if k == "GRAND TOTAL" else v, normal)] for k, v in totals],
@@ -238,20 +238,20 @@ def generate_smart_contract_pdf(
     ]))
     elements.append(totals_table)
 
-    # ══════════════════════════════════════════
+    # â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
     #  3. FINANCING TERMS
-    # ══════════════════════════════════════════
+    # â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
     elements.append(Paragraph("3. FINANCING TERMS", section_style))
 
     terms_data = [
-        ["Listing Title", listing.listing_title or "—"],
-        ["Listing Description", listing.listing_description or "—"],
+        ["Listing Title", listing.listing_title or "â€”"],
+        ["Listing Description", listing.listing_description or "â€”"],
         ["Requested Percentage", f"{listing.requested_percentage}%"],
-        ["Requested Amount", f"₹{listing.requested_amount:,.2f}"],
+        ["Requested Amount", f"â‚¹{listing.requested_amount:,.2f}"],
         ["Max Interest Rate (Vendor)", f"{listing.max_interest_rate}% p.a."],
         ["Repayment Period", f"{listing.repayment_period_days} days"],
         ["Risk Score at Listing", f"{listing.risk_score}/100" if listing.risk_score else "N/A"],
-        ["Listed Date", listing.created_at.strftime("%d %B %Y, %H:%M") if listing.created_at else "—"],
+        ["Listed Date", listing.created_at.strftime("%d %B %Y, %H:%M") if listing.created_at else "â€”"],
     ]
     terms_rows = [[Paragraph(f"<b>{k}</b>", small), Paragraph(str(v), normal)] for k, v in terms_data]
     terms_table = Table(terms_rows, colWidths=[55 * mm, 125 * mm])
@@ -265,24 +265,24 @@ def generate_smart_contract_pdf(
     ]))
     elements.append(terms_table)
 
-    # ══════════════════════════════════════════
+    # â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
     #  4. FUNDING DETAILS
-    # ══════════════════════════════════════════
+    # â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
     elements.append(Paragraph("4. FUNDING DETAILS", section_style))
 
     funded_amount = listing.funded_amount or 0
     funding_data = [
-        ["Funded Amount", f"₹{funded_amount:,.2f}"],
-        ["Funded By", listing.funded_by or "—"],
-        ["Funded Date", listing.funded_at.strftime("%d %B %Y, %H:%M") if listing.funded_at else "—"],
+        ["Funded Amount", f"â‚¹{funded_amount:,.2f}"],
+        ["Funded By", listing.funded_by or "â€”"],
+        ["Funded Date", listing.funded_at.strftime("%d %B %Y, %H:%M") if listing.funded_at else "â€”"],
     ]
     # Calculate total interest earned
     total_interest = sum(r.interest_amount for r in repayments) if repayments else 0
     total_principal = sum(r.principal_amount for r in repayments) if repayments else 0
     total_paid = sum(r.paid_amount or r.total_amount for r in repayments if r.status == "paid") if repayments else 0
-    funding_data.append(["Total Principal", f"₹{total_principal:,.2f}"])
-    funding_data.append(["Total Interest Earned", f"₹{total_interest:,.2f}"])
-    funding_data.append(["Total Amount Repaid", f"₹{total_paid:,.2f}"])
+    funding_data.append(["Total Principal", f"â‚¹{total_principal:,.2f}"])
+    funding_data.append(["Total Interest Earned", f"â‚¹{total_interest:,.2f}"])
+    funding_data.append(["Total Amount Repaid", f"â‚¹{total_paid:,.2f}"])
 
     if listing.settlement_date:
         funding_data.append(["Settlement Date", listing.settlement_date.strftime("%d %B %Y, %H:%M")])
@@ -299,9 +299,9 @@ def generate_smart_contract_pdf(
     ]))
     elements.append(funding_table)
 
-    # ══════════════════════════════════════════
+    # â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
     #  5. REPAYMENT SCHEDULE
-    # ══════════════════════════════════════════
+    # â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
     if repayments:
         elements.append(Paragraph("5. REPAYMENT SCHEDULE", section_style))
 
@@ -312,12 +312,12 @@ def generate_smart_contract_pdf(
             repay_rows.append([
                 str(r.installment_number),
                 r.due_date,
-                f"₹{r.principal_amount:,.2f}",
-                f"₹{r.interest_amount:,.2f}",
-                f"₹{r.total_amount:,.2f}",
+                f"â‚¹{r.principal_amount:,.2f}",
+                f"â‚¹{r.interest_amount:,.2f}",
+                f"â‚¹{r.total_amount:,.2f}",
                 status_str,
-                r.paid_date or "—",
-                f"₹{r.paid_amount:,.2f}" if r.paid_amount else "—",
+                r.paid_date or "â€”",
+                f"â‚¹{r.paid_amount:,.2f}" if r.paid_amount else "â€”",
             ])
 
         repay_table = Table(repay_rows, colWidths=[8*mm, 24*mm, 24*mm, 22*mm, 24*mm, 20*mm, 24*mm, 24*mm], repeatRows=1)
@@ -342,14 +342,14 @@ def generate_smart_contract_pdf(
         elements.append(Spacer(1, 3 * mm))
         elements.append(Paragraph(
             f"<b>Repayment Summary:</b> {paid_count}/{total_count} installments paid | "
-            f"Total Repaid: ₹{total_paid:,.2f} | "
-            f"Outstanding: ₹{sum(r.total_amount for r in repayments if r.status != 'paid'):,.2f}",
+            f"Total Repaid: â‚¹{total_paid:,.2f} | "
+            f"Outstanding: â‚¹{sum(r.total_amount for r in repayments if r.status != 'paid'):,.2f}",
             normal,
         ))
 
-    # ══════════════════════════════════════════
+    # â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
     #  6. BLOCKCHAIN VERIFICATION
-    # ══════════════════════════════════════════
+    # â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
     elements.append(Paragraph("6. BLOCKCHAIN VERIFICATION", section_style))
     elements.append(Paragraph(
         "All transactions in this contract are immutably recorded on the InvoX blockchain. "
@@ -375,15 +375,15 @@ def generate_smart_contract_pdf(
     ]))
     elements.append(chain_table)
 
-    # ══════════════════════════════════════════
+    # â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
     #  7. TERMS & CONDITIONS
-    # ══════════════════════════════════════════
+    # â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
     elements.append(Paragraph("7. TERMS & CONDITIONS", section_style))
 
     terms_text = [
         "1. This Smart Contract is generated by the InvoX platform and represents a binding record of the invoice financing transaction between the Vendor (Borrower) and Lender (Investor).",
         "2. The Vendor has listed the above invoice on the InvoX marketplace for financing. The Lender has agreed to fund the invoice at the stated terms.",
-        f"3. The Vendor agrees to repay the funded amount of ₹{funded_amount:,.2f} plus applicable interest within {listing.repayment_period_days} days as per the repayment schedule above.",
+        f"3. The Vendor agrees to repay the funded amount of â‚¹{funded_amount:,.2f} plus applicable interest within {listing.repayment_period_days} days as per the repayment schedule above.",
         "4. All payments are processed through the InvoX Pay gateway with 256-bit SSL encryption.",
         "5. In case of default, the Lender reserves the right to initiate recovery proceedings as per applicable Indian laws including the MSME Development Act, 2006.",
         "6. Both parties acknowledge that all transactions are immutably recorded on the InvoX blockchain and can be verified independently.",
@@ -394,9 +394,9 @@ def generate_smart_contract_pdf(
         elements.append(Paragraph(t, body))
         elements.append(Spacer(1, 1.5 * mm))
 
-    # ══════════════════════════════════════════
+    # â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
     #  8. SIGNATURES
-    # ══════════════════════════════════════════
+    # â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
     elements.append(Spacer(1, 8 * mm))
     elements.append(HRFlowable(width="100%", thickness=1, color=colors.HexColor("#cbd5e1")))
     elements.append(Spacer(1, 6 * mm))
@@ -424,9 +424,9 @@ def generate_smart_contract_pdf(
     ]))
     elements.append(sig_table)
 
-    # ══════════════════════════════════════════
+    # â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
     #  FOOTER
-    # ══════════════════════════════════════════
+    # â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
     elements.append(Spacer(1, 10 * mm))
     elements.append(HRFlowable(width="100%", thickness=1.5, color=colors.HexColor("#1e40af")))
     elements.append(Spacer(1, 3 * mm))
@@ -437,9 +437,10 @@ def generate_smart_contract_pdf(
         center_small,
     ))
     elements.append(Paragraph(
-        f"© {datetime.utcnow().year} InvoX — Embedded Invoice Financing Platform for MSMEs | All Rights Reserved",
+        f"Â© {datetime.utcnow().year} InvoX â€” Embedded Invoice Financing Platform for MSMEs | All Rights Reserved",
         ParagraphStyle("FooterCopy", parent=center_small, fontSize=7, textColor=colors.HexColor("#94a3b8")),
     ))
 
     doc.build(elements)
     return buf.getvalue()
+

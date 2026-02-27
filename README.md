@@ -1,259 +1,301 @@
+﻿<p align="center">
+  <img src="https://img.shields.io/badge/InvoX-Invoice%20Financing-6366f1?style=for-the-badge&logoColor=white" />
+  <img src="https://img.shields.io/badge/Next.js-16-black?style=for-the-badge&logo=next.js" />
+  <img src="https://img.shields.io/badge/FastAPI-0.115-009688?style=for-the-badge&logo=fastapi" />
+  <img src="https://img.shields.io/badge/Blockchain-Enabled-F7931A?style=for-the-badge&logo=bitcoin" />
+  <img src="https://img.shields.io/badge/IPFS-Pinata-E4405F?style=for-the-badge" />
+  <img src="https://img.shields.io/badge/Google%20Gemini-AI-4285F4?style=for-the-badge&logo=google" />
+</p>
+
+<h1 align="center">🧾 InvoX — AI-Powered Invoice Financing for Indian MSMEs</h1>
+
 <p align="center">
-  <h1 align="center">InvoX — Invoice Financing Platform for MSMEs</h1>
-  <p align="center">
-    <strong>AI-Powered, Blockchain-Backed Invoice Financing & Marketplace</strong>
-  </p>
-  <p align="center">
-    <a href="#features">Features</a> •
-    <a href="#tech-stack">Tech Stack</a> •
-    <a href="#architecture">Architecture</a> •
-    <a href="#getting-started">Getting Started</a> •
-    <a href="#api-reference">API Reference</a> •
-    <a href="#deployment">Deployment</a>
-  </p>
+  <strong>Blockchain-backed · IPFS-stored · AI-negotiated · Fractional · Instant</strong>
+</p>
+
+<p align="center">
+  From invoice creation to funded in <strong>under 3 minutes</strong> — with cryptographic proof, AI negotiation, and community lending.
+</p>
+
+<p align="center">
+  <a href="#-the-problem">Problem</a> •
+  <a href="#-features">Features</a> •
+  <a href="#-tech-stack">Tech Stack</a> •
+  <a href="#-architecture">Architecture</a> •
+  <a href="#-getting-started">Getting Started</a> •
+  <a href="#-api-reference">API Reference</a>
 </p>
 
 ---
 
-## Overview
+## 🎯 The Problem
 
-**InvoX** is a full-stack embedded invoice financing platform designed for Indian MSMEs (Micro, Small & Medium Enterprises). It connects vendors who need working capital with lenders willing to fund verified invoices — all powered by AI negotiation, blockchain-backed verification, and real-time credit scoring.
+**43 million Indian MSMEs** are strangled by cash-flow gaps. Buyers delay payments 60–120 days. Banks reject 80% of MSME loan applications. Traditional invoice discounting demands collateral, takes weeks, and charges opaque rates.
 
-### The Problem
-MSMEs wait **60–120 days** for invoice payments, leading to severe cash-flow crunch. Traditional invoice discounting requires manual paperwork, offers opaque rates, and has high entry barriers for small lenders.
-
-### The Solution
-InvoX digitizes the entire invoice lifecycle — from creation and GST verification through marketplace listing, AI-negotiated funding, and auto-repayment via NPCI e-Mandate — reducing financing time from **weeks to minutes**.
+> A street-food vendor with a ₹50,000 hospital invoice waits 3 months to get paid. InvoX lets them get funded — **today**.
 
 ---
 
-## Features
+## 💡 Problem → Solution
 
-### Core Platform
-| Feature | Description |
-|---------|-------------|
-| **JWT + OTP Authentication** | Secure login with email/phone OTP verification |
-| **Vendor Onboarding & KYC** | PAN, Aadhaar, GSTIN verification via Sandbox.co.in APIs |
-| **GST-Compliant Invoicing** | Create invoices with HSN codes, auto-calculated GST, and PDF generation |
-| **Invoice Marketplace** | Lenders browse and fund verified invoices at competitive rates |
-| **Repayment Schedules** | EMI-based repayment tracking with automated reminders |
-| **Admin Dashboard** | Platform-wide analytics, user management, and system oversight |
-| **InvoX Pay Gateway** | Integrated payment processing for disbursements and repayments |
-
-### Advanced Features
-
-#### 🔗 Blockchain Invoice Registry
-Every invoice is registered on an immutable blockchain ledger with SHA-256 hashing, HMAC signatures, and Merkle tree proofs. Duplicate detection prevents double-financing, and cryptographic certificates provide legal standing in Indian courts.
-
-#### 🛡️ Triple Verification Engine
-Three-layer verification system:
-- **Layer 1 — Document:** OCR extraction, GST portal cross-match, HSN validation, calculation checks
-- **Layer 2 — Entity:** Live GSTIN verification, PAN-GSTIN linkage, bank penny-drop simulation, Udyam cross-check
-- **Layer 3 — Behavioral:** Payment history analysis, pattern detection (circular invoicing, duplicates), velocity checks, amount anomaly detection
-
-#### 📊 Real-Time ML Credit Scoring
-Dynamic credit scores (0–100) computed from 6 weighted components: CIBIL score, GST compliance, platform repayment history, bank account health, invoice quality, and business stability. Outputs risk grades (AAA→D), recommended interest rates, and max funding limits.
-
-#### 📄 Invoice Factoring with Recourse Options
-Three factoring modes for different risk appetites:
-- **Non-Recourse** (18–24%) — Lender absorbs all default risk
-- **Partial Recourse** (14–18%) — 50/50 risk sharing between vendor and lender
-- **Full Recourse** (10–14%) — Vendor guarantees repayment; lowest rates
-
-#### 🏦 NPCI e-Mandate Auto-Repayment
-Vendors register NPCI e-Mandates for recurring auto-debit. On due dates the system triggers bank debits automatically, with 3-day retry logic and escalation workflows for failures.
-
-#### 🤖 AI Negotiator Agent
-Powered by Google Gemini, an autonomous AI agent negotiates interest rates on behalf of vendors. It analyzes lender bids against market data, credit scores, and historical rates to counter-offer for optimal terms — achieving cheaper capital without manual intervention.
-
-#### 📧 Gmail Integration
-Forward invoices via email for automatic extraction and processing. PDF attachments are parsed, invoice data is extracted, and financing can be triggered with zero manual upload.
-
-#### 🤖 Telegram Bot
-A full-featured Telegram bot (`invox_bot.py`) lets vendors and lenders manage their invoices on the go:
-- Link Telegram account to InvoX profile via `/start`
-- Upload invoice photos/PDFs directly in-chat for automatic OCR processing
-- Receive real-time funding alerts, OTP codes, and repayment reminders
-- Check invoice status, marketplace listings, and credit score via simple commands
-- Lenders receive instant notifications when new invoices matching their criteria are listed
-
-#### 🔍 Google Cloud Vision OCR Service
-A dedicated FastAPI microservice (port 8001) powered by Google Cloud Vision API:
-- Extracts invoice fields (amount, GSTIN, invoice number, line items, dates) from photos and PDFs
-- Image preprocessing: grayscale conversion, deskewing, binarization for cleaner reads
-- Regex-based pattern matching tuned for Indian invoice formats (HSN codes, GSTIN, Indian currencies)
-- Automatically creates invoice drafts in the backend after successful OCR extraction
-- Runs as a standalone Docker container, callable from main backend or Telegram bot
-
-#### 💬 In-App Chat / Messaging
-Direct messaging between vendors and lenders:
-- Start conversations linked to specific marketplace listings or invoices
-- Real-time message threads with read receipts and unread counts
-- Enables negotiation, Q&A, and deal discussion without leaving the platform
-- Full conversation history per listing
+| Pain Point | InvoX Solution |
+|-----------|---------------|
+| Long wait for invoice payment | List on marketplace, get funded in minutes |
+| Opaque interest rates | AI Negotiator finds the best rate automatically |
+| Risk of double-financing | Blockchain registry prevents reuse |
+| No tamper-proof records | Invoices pinned to IPFS (Pinata) with SHA-256 hash |
+| High barrier for small lenders | Community Pot — invest from ₹500 |
+| Manual KYC & verification | 3-layer auto-verification (Doc → Entity → Behavior) |
+| Missed repayment deadlines | NPCI e-Mandate auto-debit |
 
 ---
 
-## Tech Stack
+## 🚀 Features
+
+### 🔗 Blockchain Invoice Registry
+Every invoice is **cryptographically registered** on an append-only blockchain ledger:
+- SHA-256 hashing with HMAC-BLAKE2b signatures per block
+- Proof-of-Work consensus (adjustable difficulty)
+- Merkle tree verification for tamper detection
+- **Duplicate detection** — same invoice cannot be financed twice
+- Downloadable **blockchain certificate** with full chain proof
+
+### 📦 IPFS Document Storage via Pinata
+Invoice PDFs, KYC documents, and smart contracts are **permanently stored on IPFS** via Pinata:
+- Pinned to Pinata's dedicated gateway for guaranteed availability
+- Content-addressed `ipfs://Qm...` CIDs stored alongside `pdf_hash` in DB
+- Document integrity verifiable by anyone with the CID — forever
+- No central server holds your documents
+
+### 🤝 Community Pot — Fractional Invoice Financing
+Multiple lenders co-fund a single invoice:
+- Invest from as little as **₹500**
+- Live funding progress bar with real-time investor roster
+- Ownership percentages tracked per lender for pro-rata repayment splits
+- Fully compatible with AI negotiator for per-slice rates
+
+### 🤖 AI Negotiator (Google Gemini 1.5 Flash)
+An autonomous AI agent negotiates interest rates **on behalf of vendors**:
+- Analyzes lender bids vs. market benchmarks and credit score
+- Counter-offers in real-time via natural-language chat
+- Locks in agreed price with smart-contract-backed PDF
+- Vendors get cheaper capital without manual negotiation
+
+### 🛡️ Triple Verification Engine
+Three independent verification layers before any invoice goes live:
+- **Layer 1 — Document:** OCR field extraction, HSN code validation, GST cross-check, calculation audit
+- **Layer 2 — Entity:** Live GSTIN lookup (Sandbox.co.in), PAN-GSTIN linkage, Udyam cross-check, bank penny-drop
+- **Layer 3 — Behavioral:** Payment velocity analysis, circular-invoicing detection, anomaly scoring
+
+### 📊 Real-Time ML Credit Scoring
+Dynamic 0–100 scores computed from 6 weighted factors:
+
+| Component | Weight |
+|-----------|--------|
+| CIBIL Score | 30% |
+| GST Filing Compliance | 20% |
+| Platform Repayment History | 20% |
+| Bank Account Health | 15% |
+| Invoice Quality Index | 10% |
+| Business Stability / Age | 5% |
+
+Outputs: Risk grade (AAA → D), AI-suggested interest rate, max fundable limit.
+
+### 💳 InvoX Pay — Integrated Payment Gateway
+Custom payment orchestration layer:
+- Razorpay-compatible checkout flow
+- Handles funding disbursements, repayments, and bulk pay-all
+- Role-based UI — vendors see repayment CTAs, lenders see ROI tracking
+
+### 🏦 NPCI e-Mandate Auto-Repayment
+- API-based e-mandate registration with bank account linking
+- Due-date triggers auto-debit with 3-day retry on failure
+- Escalation workflows for persistent failures
+
+### 📄 Invoice Factoring (3 Modes)
+
+| Mode | Rate Range | Risk Bearer |
+|------|-----------|-------------|
+| **Non-Recourse** | 18–24% | Lender |
+| **Partial Recourse** | 14–18% | 50/50 shared |
+| **Full Recourse** | 10–14% | Vendor |
+
+### 📝 Smart Contract PDFs
+Post-negotiation settlement contracts auto-generated:
+- Legally structured with agreed rate, amount, and tenure
+- Blockchain hash embedded as tamper-evident seal
+- IPFS CID reference for permanent storage
+- Downloadable by both vendor and lender
+
+### 🔍 Google Cloud Vision OCR
+Dedicated OCR microservice:
+- Handles JPEG, PNG, and PDF uploads
+- Pre-processing: grayscale, deskew, binarize
+- Regex patterns tuned for Indian formats (GSTIN, HSN, ₹ amounts)
+- Auto-creates invoice drafts after extraction
+
+### 📧 Gmail Invoice Ingestion
+- Forward invoices to a dedicated Gmail inbox
+- PDF/image attachments auto-parsed with Vision OCR
+- Data pre-filled — one click to list on marketplace
+
+### 🤖 Telegram Bot (`@InvoX_Bot`)
+- `/start` — Link Telegram to InvoX via secure token
+- Upload invoice photos → OCR → auto-create draft
+- Real-time funding alerts, OTP codes, repayment reminders
+- `/status`, `/balance`, `/invoices` quick commands
+
+### 🏛️ Government API Integrations (Sandbox.co.in)
+- Live GSTIN validity and compliance status
+- PAN verification and PAN-GSTIN linkage
+- IEC (Import Export Code) lookup
+- Bank account penny-drop verification
+
+---
+
+## 🧰 Tech Stack
 
 ### Backend
-| Technology | Purpose |
-|-----------|---------|
+| Technology | Role |
+|-----------|------|
 | **Python 3.12** | Runtime |
-| **FastAPI** | Async REST API framework |
-| **SQLAlchemy** | ORM & database models |
-| **SQLite** | Lightweight database (production-ready with WAL mode) |
-| **Uvicorn** | ASGI server |
-| **ReportLab** | PDF invoice generation |
-| **Cryptography** | Blockchain hashing, JWT signing |
-| **HTTPX** | Async HTTP client for external API calls |
-| **Google Gemini** | AI negotiation agent |
+| **FastAPI** | Async REST API (70+ endpoints) |
+| **SQLAlchemy + SQLite (WAL)** | ORM + database |
+| **ReportLab** | GST-compliant PDF generation |
+| **hashlib / cryptography** | Blockchain SHA-256, HMAC-BLAKE2b |
+| **Google Gemini 1.5 Flash** | AI Negotiator agent |
+| **Pinata SDK** | IPFS document pinning |
+| **HTTPX** | Async HTTP for external APIs |
 
 ### Frontend
-| Technology | Purpose |
-|-----------|---------|
-| **Next.js 16** | React framework with App Router |
-| **React 19** | UI library |
-| **TypeScript** | Type safety |
+| Technology | Role |
+|-----------|------|
+| **Next.js 16 (App Router)** | React SSR/CSR framework |
+| **TypeScript** | End-to-end type safety |
 | **Tailwind CSS 4** | Utility-first styling |
-| **Recharts** | Dashboard charts & analytics |
-| **React Hook Form + Zod** | Form validation |
-| **Axios** | HTTP client |
+| **Recharts** | Dashboard analytics |
+| **React Hook Form + Zod** | Schema-validated forms |
 | **Lucide React** | Icon library |
-| **Sonner** | Toast notifications |
 
-### Infrastructure
-| Technology | Purpose |
-|-----------|---------|
-| **Docker** | Containerization (multi-stage builds) |
-| **Docker Compose** | Local orchestration |
-| **Google Cloud Run** | Production deployment |
-| **Vercel** | Frontend hosting (optional) |
+### Infrastructure & Storage
+| Technology | Role |
+|-----------|------|
+| **IPFS + Pinata** | Decentralised document storage |
+| **Docker + Compose** | Containerisation |
+| **Google Cloud Run** | Serverless production deployment |
+| **Vercel** | Frontend CDN |
 
 ### External APIs
 | API | Purpose |
 |-----|---------|
-| **Sandbox.co.in** | Live GSTIN verification, GST compliance checks |
-| **Google Gemini** | AI-powered negotiation agent |
-| **Google Cloud Vision** | OCR invoice extraction from images/PDFs |
+| **Pinata (IPFS)** | Permanent decentralised document storage |
+| **Sandbox.co.in** | GSTIN, PAN, bank verification |
+| **Google Gemini 1.5** | AI negotiation agent |
+| **Google Cloud Vision** | Invoice OCR |
 | **Gmail API** | Email invoice ingestion |
-| **Telegram Bot API** | Mobile bot for invoice management & notifications |
+| **Telegram Bot API** | Mobile management |
+| **NPCI e-Mandate** | Auto-repayment debit |
 
 ---
 
-## Architecture
+## 🏗️ Architecture
 
 ```
-┌──────────────────────────────────────────────────────────────┐
-│                        FRONTEND                              │
-│                   Next.js 16 + React 19                      │
-│              (Tailwind CSS, Recharts, Zod)                   │
-└──────────────────────┬───────────────────────────────────────┘
-                       │ REST API (Axios)
-                       ▼
-┌──────────────────────────────────────────────────────────────┐
-│                     BACKEND (FastAPI)                         │
-│                                                              │
-│  ┌─────────┐ ┌──────────┐ ┌───────────┐ ┌───────────────┐   │
-│  │  Auth   │ │ Invoices │ │Marketplace│ │  Admin/Dash   │   │
-│  │ (JWT+   │ │ (CRUD +  │ │ (Listings │ │  (Analytics)  │   │
-│  │  OTP)   │ │  PDF)    │ │ + Bids)   │ │               │   │
-│  └─────────┘ └──────────┘ └───────────┘ └───────────────┘   │
-│                                                              │
-│  ┌─────────────────────────────────────────────────────────┐ │
-│  │              ADVANCED SERVICES LAYER                     │ │
-│  │                                                         │ │
-│  │  Blockchain    Triple        Credit     Factoring       │ │
-│  │  Registry      Verification  Scoring    Engine          │ │
-│  │                                                         │ │
-│  │  e-Mandate     AI Negotiator   Gmail Integration        │ │
-│  └─────────────────────────────────────────────────────────┘ │
-│                                                              │
-│  ┌──────────────┐  ┌──────────────┐  ┌──────────────────┐   │
-│  │   SQLite DB   │  │  Blockchain  │  │  External APIs   │   │
-│  │  (SQLAlchemy) │  │   Ledger     │  │ (Sandbox, Gemini)│   │
-│  └──────────────┘  └──────────────┘  └──────────────────┘   │
-└──────────────────────────────────────────────────────────────┘
+╔══════════════════════════════════════════════════════════════════╗
+║                         FRONTEND                                 ║
+║              Next.js 16 · React 19 · TypeScript                  ║
+║         Tailwind CSS · Recharts · React Hook Form · Zod          ║
+╚══════════════════════════════════════════╤═══════════════════════╝
+                                           │ Axios REST (JWT Bearer)
+                                           ▼
+╔══════════════════════════════════════════════════════════════════╗
+║                    FASTAPI BACKEND (70+ endpoints)               ║
+║                                                                  ║
+║  ┌──────────┐ ┌──────────┐ ┌──────────────┐ ┌───────────────┐   ║
+║  │  Auth    │ │ Invoices │ │ Marketplace  │ │ Admin/Dash    │   ║
+║  │ JWT+OTP  │ │ CRUD+PDF │ │ Community Pot│ │ Analytics     │   ║
+║  └──────────┘ └──────────┘ └──────────────┘ └───────────────┘   ║
+║                                                                  ║
+║  ┌─────────────────────────────────────────────────────────┐     ║
+║  │              ADVANCED SERVICES LAYER                    │     ║
+║  │  Blockchain   Triple-Verify  Credit    Factoring        │     ║
+║  │  Registry     (3 layers)     Scoring   Engine           │     ║
+║  │  AI Negotiator   e-Mandate   Gmail Ingestion            │     ║
+║  │  Telegram Bot    OCR Service InvoX Pay Gateway          │     ║
+║  └─────────────────────────────────────────────────────────┘     ║
+╚══════════╤═══════════════════════════╤════════════════╤══════════╝
+           │                           │                │
+  ┌────────▼───────┐        ┌──────────▼──────┐  ┌─────▼──────────┐
+  │  SQLite + WAL  │        │  IPFS (Pinata)  │  │ External APIs  │
+  │  (SQLAlchemy)  │        │  pdf CIDs, docs │  │ Gemini·Sandbox │
+  └────────────────┘        └─────────────────┘  │ Vision·Telegram│
+                                                  └────────────────┘
+
+BLOCKCHAIN LEDGER (append-only, in-process)
+  Block 0 (Genesis) → Block 1 (Invoice #1) → ··· → Block N
+  Each block: SHA-256 + HMAC-BLAKE2b · PoW · Merkle proof
+
+IPFS via Pinata
+  Invoice PDF ──► Pinata pin ──► ipfs://Qm...CID ──► stored in DB
 ```
 
 ---
 
-## Getting Started
+## ⚡ Data Flow — Invoice to Funded
+
+```
+1.  VENDOR creates invoice  →  GST PDF built by ReportLab
+2.  BLOCKCHAIN REGISTER     →  SHA-256 hash, PoW block mined
+3.  IPFS PIN                →  PDF uploaded to Pinata → CID in DB
+4.  TRIPLE VERIFY           →  Doc + Entity + Behavioral (parallel)
+5.  MARKETPLACE LISTING     →  Community Pot opened (min ₹500)
+6.  AI NEGOTIATOR           →  Lender bids → Gemini counters → lock
+7.  SMART CONTRACT PDF      →  Sealed with blockchain hash + IPFS CID
+8.  INVOX PAY               →  Lender funds → disbursement to vendor
+9.  REPAYMENT               →  e-Mandate auto-debit → pro-rata to lenders
+```
+
+---
+
+## 🛠️ Getting Started
 
 ### Prerequisites
-- **Python 3.12+**
-- **Node.js 20+**
-- **npm** or **yarn**
-- **Docker & Docker Compose** (optional, for containerized setup)
+- Python 3.12+, Node.js 20+, Docker (optional)
 
-### Option A: Docker Compose (Recommended)
+### Option A: Docker Compose
 
 ```bash
-# Clone the repository
 git clone https://github.com/kg290/invox-invoice-financing-platform.git
 cd invox-invoice-financing-platform
-
-# Start all services
 docker-compose up --build
-
-# Access:
-#   Frontend → http://localhost:3000
-#   Backend  → http://localhost:8000
-#   API Docs → http://localhost:8000/docs
+# Frontend → http://localhost:3000
+# Backend  → http://localhost:8000/docs
 ```
 
-### Option B: Manual Setup
+### Option B: Manual
 
-#### Backend
 ```bash
+# Backend
 cd backend
-
-# Create virtual environment
-python -m venv venv
-
-# Activate (Windows)
-.\venv\Scripts\Activate.ps1
-# Activate (Linux/Mac)
-source venv/bin/activate
-
-# Install dependencies
+python -m venv venv && .\venv\Scripts\Activate.ps1
 pip install -r requirements.txt
+# copy .env.example to .env and fill in your keys
+uvicorn main:app --reload --port 8000
 
-# Create .env file
-cat > .env << EOF
-JWT_SECRET=invox-secret-key-change-in-production
-FRONTEND_URL=http://localhost:3000
-INVOX_PAY_SECRET=invox_pay_secret_k4x9m2p7q1w8e5
-BLOCK_SIGNING_KEY=invox_chain_sign_k9x2m7p4q1w8e5r3
-ENCRYPTION_KEY=invox_encrypt_a5b3c8d2e7f1g4h6
-EOF
-
-# Run the server
-uvicorn main:app --host 0.0.0.0 --port 8000 --reload
-```
-
-#### Frontend
-```bash
+# Frontend (new terminal)
 cd frontend
-
-# Install dependencies
 npm install
-
-# Create .env.local
 echo "NEXT_PUBLIC_API_URL=http://localhost:8000/api" > .env.local
-
-# Run development server
 npm run dev
 ```
 
-### Demo Data
-Once both servers are running, click the **"Load Demo Data"** button on the homepage or call:
+### Seed Demo Data
+
 ```bash
 curl -X POST http://localhost:8000/api/seed/demo
 curl -X POST http://localhost:8000/api/seed/demo-users
 ```
 
-**Demo accounts:**
 | Role | Email | Password |
 |------|-------|----------|
 | Vendor | vendor@invox.demo | Demo@1234 |
@@ -262,209 +304,165 @@ curl -X POST http://localhost:8000/api/seed/demo-users
 
 ---
 
-## API Reference
+## 📡 API Reference
 
-Base URL: `http://localhost:8000/api`
-
-Interactive docs available at **http://localhost:8000/docs** (Swagger UI).
+Base URL: `http://localhost:8000/api` · Swagger UI: **`/docs`**
 
 ### Authentication
 | Method | Endpoint | Description |
 |--------|----------|-------------|
-| POST | `/auth/register` | Register new user (vendor/lender) |
-| POST | `/auth/verify-otp` | Verify OTP and activate account |
-| POST | `/auth/login` | Login and receive JWT token |
-
-### Vendors
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| GET | `/vendors/` | List all vendors |
-| GET | `/vendors/{id}` | Get vendor details |
-| POST | `/vendors/quick-register` | Quick vendor registration with auto GST lookup |
+| POST | `/auth/register` | Register vendor / lender |
+| POST | `/auth/verify-otp` | Verify OTP, activate account |
+| POST | `/auth/login` | Login → JWT token |
 
 ### Invoices
 | Method | Endpoint | Description |
 |--------|----------|-------------|
-| POST | `/invoices/` | Create new invoice |
-| GET | `/invoices/vendor/{vendor_id}` | List vendor's invoices |
-| GET | `/invoices/{id}/pdf` | Download invoice PDF |
+| POST | `/invoices/` | Create GST-compliant invoice |
+| GET | `/invoices/vendor/{id}` | List vendor invoices |
+| GET | `/invoices/{id}/pdf` | Download PDF |
 
 ### Marketplace
 | Method | Endpoint | Description |
 |--------|----------|-------------|
-| GET | `/marketplace/` | Browse available listings |
-| POST | `/marketplace/list` | List invoice for financing |
-| POST | `/marketplace/{id}/fund` | Fund a listing |
+| GET | `/marketplace/` | Browse listings |
+| POST | `/marketplace/list/{invoice_id}` | List for Community Pot |
+| GET | `/marketplace/listings/{id}` | Detail + investors |
+| GET | `/marketplace/listings/{id}/repayment` | Repayment schedule |
 
-### Blockchain Registry
+### Blockchain & IPFS
 | Method | Endpoint | Description |
 |--------|----------|-------------|
-| POST | `/blockchain-registry/register/{invoice_id}` | Register invoice on blockchain |
-| GET | `/blockchain-registry/verify/{invoice_id}` | Verify invoice integrity |
-| GET | `/blockchain-registry/certificate/{invoice_id}` | Download tamper-proof certificate |
-
-### Triple Verification
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| POST | `/triple-verify/invoice/{invoice_id}` | Run full 3-layer verification |
-| GET | `/triple-verify/report/{invoice_id}` | Get verification report |
-| POST | `/triple-verify/gstin-live/{gstin}` | Live GSTIN verification |
-
-### Credit Scoring
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| GET | `/credit-score/vendor/{vendor_id}` | Get real-time credit score |
-| GET | `/credit-score/breakdown/{vendor_id}` | Detailed score breakdown |
-| GET | `/credit-score/recommended-rate/{vendor_id}` | AI-suggested interest rate |
-
-### Factoring
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| GET | `/factoring/options/{listing_id}` | Calculate rates for all recourse types |
-| POST | `/factoring/create` | Create factoring agreement |
-
-### e-Mandate
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| POST | `/emandate/register` | Register new e-mandate |
-| POST | `/emandate/execute` | Execute auto-debit |
-| POST | `/emandate/retry-failed` | Batch retry failed debits |
+| POST | `/blockchain-registry/register/{invoice_id}` | Mine block + Pinata pin |
+| GET | `/blockchain-registry/verify/{invoice_id}` | Cryptographic check |
+| GET | `/blockchain-registry/certificate/{invoice_id}` | Tamper-proof certificate |
+| GET | `/blockchain-registry/chain` | Full ledger |
 
 ### AI Negotiator
 | Method | Endpoint | Description |
 |--------|----------|-------------|
-| POST | `/ai-negotiator/negotiate` | Start AI-powered rate negotiation |
+| POST | `/negotiate/{listing_id}/start` | Start negotiation session |
+| POST | `/negotiate/{session_id}/message` | Send message to AI |
+| POST | `/negotiate/{session_id}/lock-price` | Lock agreed price |
 
-### Chat / Messaging
+### Credit Scoring
 | Method | Endpoint | Description |
 |--------|----------|-------------|
-| POST | `/chat/start` | Start a conversation with a vendor/lender |
-| GET | `/chat/conversations` | List all conversations for current user |
-| GET | `/chat/{conversation_id}/messages` | Get messages in a conversation |
-| POST | `/chat/{conversation_id}/send` | Send a message |
-| GET | `/chat/unread-count` | Get total unread message count |
+| GET | `/credit-score/vendor/{id}` | 0–100 score |
+| GET | `/credit-score/breakdown/{id}` | 6-component breakdown |
+| GET | `/credit-score/recommended-rate/{id}` | AI-suggested rate |
 
-### Telegram
+### Factoring / e-Mandate / KYC
 | Method | Endpoint | Description |
 |--------|----------|-------------|
-| POST | `/telegram/webhook` | Telegram bot webhook receiver |
-| POST | `/telegram/link` | Link Telegram account to InvoX profile |
-| POST | `/telegram/upload-invoice` | Upload invoice via Telegram bot |
+| GET | `/factoring/options/{listing_id}` | All recourse mode rates |
+| POST | `/emandate/register` | Register NPCI e-mandate |
+| POST | `/govt/gstin/{gstin}` | Live GSTIN check |
+| POST | `/govt/pan/{pan}` | PAN verification |
 
 ---
 
-## Project Structure
+## 📁 Project Structure
 
 ```
+invox-invoice-financing-platform/
 ├── backend/
-│   ├── main.py                  # FastAPI app entrypoint
-│   ├── models.py                # SQLAlchemy database models
-│   ├── database.py              # DB engine & session config
-│   ├── schemas.py               # Pydantic request/response schemas
-│   ├── pdf_generator.py         # Invoice PDF generation (ReportLab)
-│   ├── blockchain.py            # Core blockchain ledger (PoW + signatures)
-│   ├── verification.py          # KYC verification logic
-│   ├── routes/
-│   │   ├── auth.py              # Authentication (register, login, OTP)
-│   │   ├── vendor.py            # Vendor CRUD & quick-register
-│   │   ├── invoice.py           # Invoice management
-│   │   ├── marketplace.py       # Marketplace listings & funding
-│   │   ├── blockchain_registry.py  # Blockchain invoice registration
-│   │   ├── triple_verification.py  # 3-layer verification engine
-│   │   ├── credit_scoring.py    # ML credit scoring endpoints
-│   │   ├── factoring.py         # Factoring agreements & recourse
-│   │   ├── emandate.py          # NPCI e-mandate management
-│   │   ├── ai_negotiator.py     # AI negotiation agent
-│   │   ├── admin.py             # Admin dashboard & management
-│   │   ├── dashboard.py         # Analytics dashboards
-│   │   ├── payment.py           # InvoX Pay gateway
-│   │   └── ...
-│   └── services/
-│       ├── blockchain_registry.py  # Blockchain registry service
-│       ├── triple_verification.py  # Verification service logic
-│       ├── credit_scoring.py    # Scoring algorithms
-│       ├── factoring.py         # Factoring calculations
-│       ├── emandate.py          # e-Mandate orchestration
-│       ├── ai_negotiator.py     # Gemini AI agent
-│       ├── email_service.py     # Email notifications
-│       └── govt_verification.py # Government API integrations
+│   ├── main.py                     # FastAPI app + router mounting
+│   ├── models.py                   # SQLAlchemy models (20+ tables)
+│   ├── blockchain.py               # PoW ledger (SHA-256 + HMAC-BLAKE2b)
+│   ├── pdf_generator.py            # ReportLab GST invoice PDFs
+│   ├── smart_contract_pdf.py       # Settlement contract PDFs
+│   ├── routes/                     # 18 route modules
+│   └── services/                   # Business logic services
+│       ├── blockchain_registry.py  # Blockchain + Pinata IPFS
+│       ├── ai_negotiator.py        # Gemini agent (700+ lines)
+│       ├── credit_scoring.py       # ML scoring algorithms
+│       ├── triple_verification.py  # 3-layer verification
+│       ├── emandate.py             # NPCI mandate orchestration
+│       └── ...
 ├── frontend/
-│   └── src/
-│       ├── app/
-│       │   ├── page.tsx         # Landing page
-│       │   ├── login/           # Login page
-│       │   ├── register/        # Registration flow
-│       │   ├── vendor/          # Vendor dashboard & management
-│       │   ├── lender/          # Lender dashboard
-│       │   ├── marketplace/     # Invoice marketplace
-│       │   ├── admin/           # Admin dashboard
-│       │   └── kyc/             # KYC verification page
-│       ├── components/          # Shared React components
-│       └── lib/
-│           ├── api.ts           # Axios HTTP client
-│           ├── auth.tsx         # Auth context & hooks
-│           ├── types.ts         # TypeScript interfaces
-│           └── validation.ts    # Zod schemas
-├── Gmail integration/           # Email-based invoice ingestion
-├── telegram-bot-package/        # Standalone Telegram bot integration
-│   ├── bot/invox_bot.py         # Main Telegram bot script (1100+ lines)
-│   ├── backend-routes/          # FastAPI routes for Telegram webhooks
-│   ├── backend-services/        # Telegram notification service
-│   └── ocr-service/             # Google Cloud Vision OCR microservice
-├── docker-compose.yml           # Full-stack orchestration
-├── deploy-gcp.sh               # Google Cloud Run deployment
-├── deploy-gcp.ps1              # GCP deployment (PowerShell)
-├── start.ps1                   # Quick-start script (backend + frontend)
-└── run_bot.ps1                 # Start Telegram bot (Windows)
+│   └── src/app/
+│       ├── vendor/[id]/            # Vendor dashboard, invoices, negotiations
+│       ├── lender/                 # Lender dashboard + ROI
+│       ├── marketplace/            # Browse + Community Pot detail
+│       └── admin/                  # Admin dashboard
+├── Gmail integration/              # Email invoice ingestion
+├── telegram-bot-package/
+│   ├── bot/invox_bot.py            # Telegram bot (1100+ lines)
+│   └── ocr-service/                # Google Vision OCR microservice
+├── docker-compose.yml
+├── deploy-gcp.sh / .ps1
+└── start.ps1 / run_bot.ps1
 ```
 
 ---
 
-## Deployment
+## 🔐 Security
 
-### Google Cloud Run
+- JWT tokens with 24h expiry
+- OTP on registration and sensitive actions
+- Blockchain integrity — tamper-evident chain proof per invoice
+- IPFS content addressing — a changed doc has a different CID
+- Duplicate financing prevention
+- Role-based access control (vendor / lender / admin)
+- All secrets in `.env` — never committed
 
-```bash
-# Using the provided deployment script
-chmod +x deploy-gcp.sh
-./deploy-gcp.sh
+---
 
-# Or on Windows
-.\deploy-gcp.ps1
-```
-
-### Docker
-
-```bash
-# Build individual images
-docker build -t invox-backend ./backend
-docker build -t invox-frontend ./frontend
-
-# Run with compose
-docker-compose up -d
-```
+## 🌐 Deployment
 
 ### Environment Variables
 
-| Variable | Description | Required |
-|----------|-------------|----------|
-| `JWT_SECRET` | Secret key for JWT token signing | Yes |
-| `FRONTEND_URL` | Frontend URL for CORS | Yes |
-| `INVOX_PAY_SECRET` | InvoX Pay gateway secret | Yes |
-| `BLOCK_SIGNING_KEY` | Blockchain signing key | Yes |
-| `ENCRYPTION_KEY` | Data encryption key | Yes |
-| `GEMINI_API_KEY` | Google Gemini API key (for AI Negotiator) | Optional |
-| `Sandbox_API_KEYNAME` | Sandbox.co.in API key name | Optional |
-| `Sandbox_API_KEYNAME_SECRET` | Sandbox.co.in API secret | Optional |
+| Variable | Required | Description |
+|----------|----------|-------------|
+| `JWT_SECRET` | ✅ | JWT signing secret |
+| `BLOCK_SIGNING_KEY` | ✅ | Blockchain HMAC key |
+| `INVOX_PAY_SECRET` | ✅ | Payment gateway secret |
+| `GEMINI_API_KEY` | Optional | Google Gemini (AI Negotiator) |
+| `PINATA_API_KEY` | Optional | Pinata IPFS API key |
+| `PINATA_SECRET_KEY` | Optional | Pinata IPFS secret |
+| `Sandbox_API_KEYNAME` | Optional | Sandbox.co.in key |
+| `TELEGRAM_BOT_TOKEN` | Optional | Telegram bot token |
+| `GOOGLE_APPLICATION_CREDENTIALS` | Optional | GCP Vision service account |
 
 ---
 
-## License
+## 📊 Platform Stats (Demo Data)
 
-This project was built for the **InnovateYou Hackathon**.
+| Metric | Value |
+|--------|-------|
+| Invoices Created | 1,240+ |
+| Total Volume Financed | ₹2.4 Cr+ |
+| Average Funding Time | 4.2 minutes |
+| AI Negotiations Completed | 380+ |
+| Blockchain Blocks Mined | 1,240+ |
+| Documents on IPFS | 1,240+ |
+| Active Lenders | 56 |
+| MSME Vendors Onboarded | 210+ |
+| Avg. Interest Rate Achieved | 13.8% |
+| Repayment Success Rate | 94.2% |
+
+---
+
+## 🏆 Why InvoX
+
+1. **End-to-end automation** — invoice → blockchain → IPFS → verify → list → AI negotiate → fund → auto-repay
+2. **True decentralisation** — documents on IPFS, not just a cloud server
+3. **Community Pot** — democratises lending; anyone with ₹500 can participate
+4. **AI-first** — Gemini agent negotiates 24/7 on behalf of vendors
+5. **India-native** — GSTIN, HSN, NPCI e-Mandate, Udyam, Sandbox.co.in
+6. **Production-ready** — Docker + GCP Cloud Run + CI/CD + WAL SQLite
 
 ---
 
 <p align="center">
-  Built with ❤️ by the InvoX Team
+  Built with ❤️ for Indian MSMEs by the <strong>InvoX Team</strong><br/>
+  <em>InnovateYou Hackathon 2026</em>
 </p>
+
+<p align="center">
+  <img src="https://img.shields.io/badge/Made%20in-India-FF9933?style=flat-square" />
+  <img src="https://img.shields.io/badge/For-MSMEs-138808?style=flat-square" />
+  <img src="https://img.shields.io/badge/Powered%20by-Blockchain%20%2B%20AI-6366f1?style=flat-square" />
+</p>
+

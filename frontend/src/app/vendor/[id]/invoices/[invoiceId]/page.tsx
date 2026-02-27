@@ -30,7 +30,7 @@ export default function InvoiceDetailPage() {
   const [loading, setLoading] = useState(true);
   const [listing, setListing] = useState(false);
   const [showListModal, setShowListModal] = useState(false);
-  const [listForm, setListForm] = useState({ listing_title: "", listing_description: "", max_interest_rate: 12, repayment_period_days: 90 });
+  const [listForm, setListForm] = useState({ listing_title: "", listing_description: "", min_interest_rate: 8, max_interest_rate: 12, repayment_period_days: 90, requested_percentage: 80 });
   const [listImages, setListImages] = useState<File[]>([]);
   const [downloading, setDownloading] = useState(false);
   const [emailing, setEmailing] = useState(false);
@@ -41,8 +41,16 @@ export default function InvoiceDetailPage() {
   useEffect(fetchInvoice, [invoiceId]);
 
   const listOnMarketplace = async () => {
-    if (listForm.max_interest_rate <= 0 || listForm.repayment_period_days <= 0) {
+    if (listForm.min_interest_rate <= 0 || listForm.max_interest_rate <= 0 || listForm.repayment_period_days <= 0) {
       toast.error("Invalid interest rate or repayment period");
+      return;
+    }
+    if (listForm.min_interest_rate >= listForm.max_interest_rate) {
+      toast.error("Minimum interest rate must be less than maximum");
+      return;
+    }
+    if (listForm.requested_percentage < 10 || listForm.requested_percentage > 100) {
+      toast.error("Funding percentage must be between 10% and 100%");
       return;
     }
     setListing(true);
@@ -51,6 +59,8 @@ export default function InvoiceDetailPage() {
       formData.append("listing_title", listForm.listing_title);
       formData.append("listing_description", listForm.listing_description);
       formData.append("max_interest_rate", String(listForm.max_interest_rate));
+      formData.append("min_interest_rate", String(listForm.min_interest_rate));
+      formData.append("requested_percentage", String(listForm.requested_percentage));
       formData.append("repayment_period_days", String(listForm.repayment_period_days));
       listImages.forEach((file) => formData.append("images", file));
       await api.post(`/marketplace/list/${invoiceId}`, formData, {
@@ -369,14 +379,40 @@ export default function InvoiceDetailPage() {
               </div>
               <div>
                 <label className="block text-xs font-medium text-gray-600 mb-1">
-                  Maximum Interest Rate (% p.a.) *
+                  Funding Percentage (% of invoice) *
                 </label>
-                <input type="number" step="0.1" min="0.1" max="36"
-                  value={listForm.max_interest_rate}
-                  onChange={(e) => setListForm({ ...listForm, max_interest_rate: Number(e.target.value) })}
+                <input type="number" step="1" min="10" max="100"
+                  value={listForm.requested_percentage}
+                  onChange={(e) => setListForm({ ...listForm, requested_percentage: Number(e.target.value) })}
                   className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm text-gray-900 placeholder:text-gray-400 focus:ring-2 focus:ring-purple-500 outline-none"
-                  placeholder="e.g. 12" />
-                <p className="text-[11px] text-gray-400 mt-1">The maximum annual interest rate you are willing to pay a lender</p>
+                  placeholder="e.g. 80" />
+                <p className="text-[11px] text-gray-400 mt-1">
+                  Request {listForm.requested_percentage}% of ₹{inv?.grand_total?.toLocaleString("en-IN")} = ₹{inv ? Math.round(inv.grand_total * listForm.requested_percentage / 100).toLocaleString("en-IN") : "0"}
+                </p>
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-medium text-gray-600 mb-1">
+                    Min Interest Rate (% p.a.) *
+                  </label>
+                  <input type="number" step="0.1" min="0.1" max="36"
+                    value={listForm.min_interest_rate}
+                    onChange={(e) => setListForm({ ...listForm, min_interest_rate: Number(e.target.value) })}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm text-gray-900 placeholder:text-gray-400 focus:ring-2 focus:ring-purple-500 outline-none"
+                    placeholder="e.g. 8" />
+                  <p className="text-[11px] text-gray-400 mt-1">Ideal rate for AI negotiator</p>
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-gray-600 mb-1">
+                    Max Interest Rate (% p.a.) *
+                  </label>
+                  <input type="number" step="0.1" min="0.1" max="36"
+                    value={listForm.max_interest_rate}
+                    onChange={(e) => setListForm({ ...listForm, max_interest_rate: Number(e.target.value) })}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm text-gray-900 placeholder:text-gray-400 focus:ring-2 focus:ring-purple-500 outline-none"
+                    placeholder="e.g. 12" />
+                  <p className="text-[11px] text-gray-400 mt-1">Upper limit you can accept</p>
+                </div>
               </div>
               <div>
                 <label className="block text-xs font-medium text-gray-600 mb-1">

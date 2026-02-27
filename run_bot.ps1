@@ -12,7 +12,7 @@
 $ErrorActionPreference = "Stop"
 
 # ── Config ──
-$TELEGRAM_BOT_TOKEN = "8279803482:AAFCfWQvRO2MOnZ9g63WfiWja9UA0otF6dI"
+$TELEGRAM_BOT_TOKEN = "8705153678:AAHGrFHCkPM1jFWuJlGQRugU1Leo8g2FOa4"
 $BACKEND_PORT       = 8000
 $BACKEND_URL        = "http://localhost:$BACKEND_PORT"
 

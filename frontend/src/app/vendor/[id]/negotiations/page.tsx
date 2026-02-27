@@ -232,7 +232,7 @@ export default function VendorNegotiationsPage() {
                                   ? "bg-white border border-gray-200 text-gray-800 rounded-bl-md shadow-sm"
                                   : "bg-gray-200 text-gray-600 rounded-bl-md"
                               }`}>
-                                <p className="text-[12px] leading-relaxed whitespace-pre-wrap">{msg.message}</p>
+                                <p className="text-[12px] leading-relaxed whitespace-pre-wrap">{msg.message.replace(/\*\*/g, '')}</p>
                                 {msg.offered_rate && (
                                   <div className={`flex gap-3 mt-1.5 pt-1.5 text-[9px] ${
                                     msg.sender === "lender" ? "border-t border-white/20 text-white/70" : "border-t border-gray-100 text-gray-400"

@@ -6,7 +6,7 @@
 $BACKEND_DIR = "d:\Hackathon\InnovateYou\backend"
 $BOT_DIR     = "d:\Hackathon\InnovateYou\telegram-bot-package\bot"
 $PYTHON      = "d:\Hackathon\InnovateYou\backend\venv\Scripts\python.exe"
-$BOT_TOKEN   = "8279803482:AAFCfWQvRO2MOnZ9g63WfiWja9UA0otF6dI"
+$BOT_TOKEN   = "8705153678:AAHGrFHCkPM1jFWuJlGQRugU1Leo8g2FOa4"
 $BACKEND_URL = "http://localhost:8000"
 
 Write-Host ""

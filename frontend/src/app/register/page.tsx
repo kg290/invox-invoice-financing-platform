@@ -6,8 +6,8 @@ import Link from "next/link";
 import { toast } from "sonner";
 import {
   FileText, Mail, Lock, Loader2, Eye, EyeOff, User, Phone,
-  Smartphone, MessageCircle, Building2, Briefcase, CreditCard, Fingerprint, Hash,
-  ShieldCheck, ExternalLink, CheckCircle2, XCircle, AlertTriangle,
+  Building2, Briefcase, CreditCard, Fingerprint, Hash,
+  ShieldCheck, ExternalLink, CheckCircle2, XCircle, AlertTriangle, Upload,
 } from "lucide-react";
 import api, { getErrorMessage } from "@/lib/api";
 
@@ -38,6 +38,35 @@ export default function RegisterPage() {
   const [showPw, setShowPw] = useState(false);
   const [verificationResult, setVerificationResult] = useState<VerificationResult | null>(null);
   const [verifying, setVerifying] = useState(false);
+
+  // Document uploads state
+  const [regDocs, setRegDocs] = useState<Record<string, { file: File; uploading: boolean; uploaded: boolean }>>({
+    aadhaar_card: { file: null as unknown as File, uploading: false, uploaded: false },
+    pan_card: { file: null as unknown as File, uploading: false, uploaded: false },
+    gst_certificate: { file: null as unknown as File, uploading: false, uploaded: false },
+  });
+
+  const handleDocUpload = async (docType: string, file: File) => {
+    if (!form.email) { toast.error("Please enter your email first"); return; }
+    setRegDocs(prev => ({ ...prev, [docType]: { ...prev[docType], file, uploading: true } }));
+    const formData = new FormData();
+    formData.append("file", file);
+    formData.append("email", form.email);
+    formData.append("doc_type", docType);
+    formData.append("stage", "registration");
+    try {
+      await api.post("/auth/upload-document", formData, {
+        headers: { "Content-Type": "multipart/form-data" },
+      });
+      setRegDocs(prev => ({ ...prev, [docType]: { file, uploading: false, uploaded: true } }));
+      toast.success(`${docType.replace("_", " ")} uploaded successfully!`);
+    } catch {
+      setRegDocs(prev => ({ ...prev, [docType]: { file, uploading: false, uploaded: false } }));
+      toast.error(`Failed to upload ${docType.replace("_", " ")}`);
+    }
+  };
+
+  const allRegDocsUploaded = regDocs.aadhaar_card.uploaded && regDocs.pan_card.uploaded && regDocs.gst_certificate.uploaded;
 
   // Listen for verification result from the govt portal tab
   const handleMessage = useCallback((event: MessageEvent) => {
@@ -188,8 +217,6 @@ export default function RegisterPage() {
 
   const channels = [
     { value: "email", label: "Email", icon: Mail },
-    { value: "sms", label: "SMS", icon: Smartphone },
-    { value: "whatsapp", label: "WhatsApp", icon: MessageCircle },
   ];
 
   const inputCls = "w-full px-4 py-3 border border-gray-200 rounded-xl text-sm text-gray-900 placeholder:text-gray-400 focus:ring-2 focus:ring-blue-500 outline-none bg-white";
@@ -541,24 +568,69 @@ export default function RegisterPage() {
               </div>
             )}
 
-            <div>
-              <label className="block text-xs font-medium text-gray-600 mb-2">OTP Delivery Channel</label>
-              <div className="flex gap-2">
-                {channels.map((ch) => (
-                  <button key={ch.value} type="button"
-                    onClick={() => setForm({ ...form, otp_channel: ch.value })}
-                    className={`flex-1 flex items-center justify-center gap-1.5 py-2.5 rounded-xl text-xs font-medium border transition-colors ${
-                      form.otp_channel === ch.value
-                        ? "bg-blue-50 border-blue-300 text-blue-700"
-                        : "bg-white border-gray-200 text-gray-500 hover:bg-gray-50"
-                    }`}>
-                    <ch.icon className="w-3.5 h-3.5" /> {ch.label}
-                  </button>
+            {/* Document Upload Section — appears after verification passes */}
+            {form.role === "vendor" && isVendorVerified && (
+              <div className="space-y-3 p-4 rounded-xl border-2 border-indigo-200 bg-indigo-50">
+                <div className="flex items-center gap-2 mb-1">
+                  <Upload className="w-4 h-4 text-indigo-600" />
+                  <span className="text-xs font-semibold text-indigo-700">Upload Required Documents</span>
+                  {allRegDocsUploaded && (
+                    <span className="ml-auto text-[10px] bg-green-200 text-green-700 px-2 py-0.5 rounded-full font-bold flex items-center gap-1">
+                      <CheckCircle2 className="w-3 h-3" /> ALL UPLOADED
+                    </span>
+                  )}
+                </div>
+                <p className="text-[11px] text-gray-500 -mt-1 mb-2">
+                  Upload scanned copies of your documents (PDF, JPG, PNG — max 10MB each)
+                </p>
+
+                {[
+                  { key: "aadhaar_card", label: "Aadhaar Card", icon: Fingerprint },
+                  { key: "pan_card", label: "PAN Card", icon: CreditCard },
+                  { key: "gst_certificate", label: "GST Certificate", icon: Hash },
+                ].map((doc) => (
+                  <div key={doc.key} className="flex items-center justify-between p-3 bg-white rounded-lg border border-gray-200">
+                    <div className="flex items-center gap-2">
+                      {regDocs[doc.key].uploaded ? (
+                        <CheckCircle2 className="w-4 h-4 text-green-500" />
+                      ) : (
+                        <doc.icon className="w-4 h-4 text-gray-400" />
+                      )}
+                      <div>
+                        <span className="text-sm text-gray-700 font-medium">{doc.label} *</span>
+                        {regDocs[doc.key].uploaded && regDocs[doc.key].file && (
+                          <p className="text-[10px] text-green-600 truncate max-w-[180px]">{regDocs[doc.key].file.name}</p>
+                        )}
+                      </div>
+                    </div>
+                    {regDocs[doc.key].uploaded ? (
+                      <label className="cursor-pointer">
+                        <input type="file" className="hidden" accept=".pdf,.jpg,.jpeg,.png"
+                          onChange={(e) => { const f = e.target.files?.[0]; if (f) handleDocUpload(doc.key, f); }} />
+                        <span className="text-[10px] text-blue-600 font-medium hover:underline">Replace</span>
+                      </label>
+                    ) : (
+                      <label className="cursor-pointer">
+                        <input type="file" className="hidden" accept=".pdf,.jpg,.jpeg,.png"
+                          onChange={(e) => { const f = e.target.files?.[0]; if (f) handleDocUpload(doc.key, f); }} />
+                        <span className="text-xs text-blue-600 font-medium hover:underline flex items-center gap-1">
+                          {regDocs[doc.key].uploading ? (
+                            <Loader2 className="w-3 h-3 animate-spin" />
+                          ) : (
+                            <Upload className="w-3 h-3" />
+                          )}
+                          Upload
+                        </span>
+                      </label>
+                    )}
+                  </div>
                 ))}
               </div>
-            </div>
+            )}
 
-            <button type="submit" disabled={loading || (form.role === "vendor" && !isVendorVerified) || (form.role === "lender" && !lenderVerified)}
+            {/* OTP is always sent via Email */}
+
+            <button type="submit" disabled={loading || (form.role === "vendor" && (!isVendorVerified || !allRegDocsUploaded)) || (form.role === "lender" && !lenderVerified)}
               className={`w-full py-3 text-white rounded-xl text-sm font-semibold disabled:opacity-60 disabled:cursor-not-allowed flex items-center justify-center gap-2 transition-all ${
                 form.role === "vendor"
                   ? "bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700"
@@ -571,6 +643,11 @@ export default function RegisterPage() {
             {form.role === "vendor" && !isVendorVerified && (
               <p className="text-center text-[11px] text-amber-600 font-medium">
                 ⚠ You must verify your documents before registration
+              </p>
+            )}
+            {form.role === "vendor" && isVendorVerified && !allRegDocsUploaded && (
+              <p className="text-center text-[11px] text-amber-600 font-medium">
+                ⚠ Please upload all required documents (Aadhaar, PAN, GST Certificate)
               </p>
             )}
             {form.role === "lender" && !lenderVerified && (

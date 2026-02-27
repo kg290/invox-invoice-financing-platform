@@ -516,48 +516,6 @@ export default function MarketplaceDetailPage() {
                 {/* OVERVIEW TAB */}
                 {activeTab === "overview" && (
                   <div className="space-y-6">
-                    {/* Risk Assessment */}
-                    <div>
-                      <h3 className="text-sm font-bold text-gray-900 mb-4 flex items-center gap-2">
-                        <Gauge className="w-4 h-4 text-indigo-500" /> AI Risk Assessment
-                      </h3>
-                      <div className="bg-gray-50 rounded-xl p-5">
-                        <div className="flex items-center justify-between mb-3">
-                          <div>
-                            <p className={`text-2xl font-bold ${risk.color}`}>{detail.risk_score?.toFixed(1) ?? "—"}<span className="text-sm font-normal text-gray-400">/100</span></p>
-                            <p className={`text-xs font-semibold ${risk.color}`}>{risk.label} Risk</p>
-                          </div>
-                          <div className="text-right text-[11px] text-gray-500 space-y-0.5">
-                            <p>🟢 0-25 Very Low</p>
-                            <p>🟡 26-55 Moderate</p>
-                            <p>🔴 56-100 High</p>
-                          </div>
-                        </div>
-                        <div className="w-full h-3 bg-gray-200 rounded-full overflow-hidden">
-                          <div className={`h-full rounded-full bg-gradient-to-r ${risk.fill} transition-all duration-1000`}
-                            style={{ width: `${detail.risk_score ?? 50}%` }} />
-                        </div>
-                        <div className="grid grid-cols-4 gap-2 mt-4 text-[10px] text-gray-500">
-                          <div className="text-center">
-                            <p className="font-semibold text-gray-700">CIBIL</p>
-                            <p>{detail.cibil_score ?? "—"}</p>
-                          </div>
-                          <div className="text-center">
-                            <p className="font-semibold text-gray-700">GST Status</p>
-                            <p className="capitalize">{detail.gst_compliance_status || "—"}</p>
-                          </div>
-                          <div className="text-center">
-                            <p className="font-semibold text-gray-700">Business Age</p>
-                            <p>{yearsInBiz ? `${yearsInBiz} years` : "—"}</p>
-                          </div>
-                          <div className="text-center">
-                            <p className="font-semibold text-gray-700">Verification</p>
-                            <p className="capitalize">{detail.profile_status || "—"}</p>
-                          </div>
-                        </div>
-                      </div>
-                    </div>
-
                     {/* Business Details */}
                     <div>
                       <h3 className="text-sm font-bold text-gray-900 mb-4 flex items-center gap-2">
@@ -805,7 +763,7 @@ export default function MarketplaceDetailPage() {
                         <th className="text-right py-2.5 font-semibold">Interest</th>
                         <th className="text-right py-2.5 font-semibold">Total</th>
                         <th className="text-center py-2.5 font-semibold">Status</th>
-                        <th className="text-right py-2.5 font-semibold">Action</th>
+                        {!isLender && <th className="text-right py-2.5 font-semibold">Action</th>}
                       </tr>
                     </thead>
                     <tbody>
@@ -823,6 +781,7 @@ export default function MarketplaceDetailPage() {
                               "bg-amber-100 text-amber-800"
                             }`}>{inst.status}</span>
                           </td>
+                          {!isLender && (
                           <td className="py-3 text-right">
                             {(inst.status === "pending" || inst.status === "overdue") && (
                               <button
@@ -856,6 +815,7 @@ export default function MarketplaceDetailPage() {
                               </span>
                             )}
                           </td>
+                          )}
                         </tr>
                       ))}
                     </tbody>
@@ -868,8 +828,8 @@ export default function MarketplaceDetailPage() {
                   <span className="font-bold text-gray-700">Grand Total: ₹{repayments.reduce((s, i) => s + i.total_amount, 0).toLocaleString("en-IN")}</span>
                 </div>
 
-                {/* Pay All Remaining Installments */}
-                {repayments.some(r => r.status === "pending" || r.status === "overdue") && (
+                {/* Pay All Remaining Installments — vendor only */}
+                {!isLender && repayments.some(r => r.status === "pending" || r.status === "overdue") && (
                   <div className="mt-4 pt-3 border-t border-gray-100">
                     <button
                       disabled={payingAll}
@@ -913,30 +873,38 @@ export default function MarketplaceDetailPage() {
                 </div>
               </div>
 
-              {/* Progress bar */}
+              {/* Progress bar — based on invoice grand total */}
               <div className="mb-3">
-                <div className="flex items-center justify-between mb-1">
-                  <span className="text-xl font-bold text-gray-900">{detail.funding_progress_pct?.toFixed(0) || 0}%</span>
-                  <span className="text-xs text-gray-500">
-                    {detail.total_investors || 0} Investor{(detail.total_investors || 0) !== 1 ? "s" : ""}
-                  </span>
-                </div>
-                <div className="w-full h-3 bg-gray-100 rounded-full overflow-hidden">
-                  <div
-                    className={`h-full rounded-full transition-all duration-1000 ease-out ${
-                      (detail.funding_progress_pct || 0) >= 100
-                        ? "bg-gradient-to-r from-emerald-400 to-green-500"
-                        : (detail.funding_progress_pct || 0) >= 50
-                        ? "bg-gradient-to-r from-indigo-400 to-purple-500"
-                        : "bg-gradient-to-r from-blue-400 to-indigo-500"
-                    }`}
-                    style={{ width: `${Math.min(100, detail.funding_progress_pct || 0)}%` }}
-                  />
-                </div>
-                <div className="flex justify-between mt-1.5">
-                  <span className="text-[11px] text-gray-500">₹{(detail.total_funded_amount || 0).toLocaleString("en-IN")} raised</span>
-                  <span className="text-[11px] text-gray-500">of ₹{detail.requested_amount.toLocaleString("en-IN")}</span>
-                </div>
+                {(() => {
+                  const invoiceTotal = detail.grand_total || detail.requested_amount;
+                  const fundedPct = invoiceTotal > 0 ? Math.min(100, ((detail.total_funded_amount || 0) / invoiceTotal) * 100) : 0;
+                  return (
+                    <>
+                      <div className="flex items-center justify-between mb-1">
+                        <span className="text-xl font-bold text-gray-900">{fundedPct.toFixed(0)}%</span>
+                        <span className="text-xs text-gray-500">
+                          {detail.total_investors || 0} Investor{(detail.total_investors || 0) !== 1 ? "s" : ""}
+                        </span>
+                      </div>
+                      <div className="w-full h-3 bg-gray-100 rounded-full overflow-hidden">
+                        <div
+                          className={`h-full rounded-full transition-all duration-1000 ease-out ${
+                            fundedPct >= 100
+                              ? "bg-gradient-to-r from-emerald-400 to-green-500"
+                              : fundedPct >= 50
+                              ? "bg-gradient-to-r from-indigo-400 to-purple-500"
+                              : "bg-gradient-to-r from-blue-400 to-indigo-500"
+                          }`}
+                          style={{ width: `${fundedPct}%` }}
+                        />
+                      </div>
+                      <div className="flex justify-between mt-1.5">
+                        <span className="text-[11px] text-gray-500">₹{(detail.total_funded_amount || 0).toLocaleString("en-IN")} raised</span>
+                        <span className="text-[11px] text-gray-500">of ₹{invoiceTotal.toLocaleString("en-IN")}</span>
+                      </div>
+                    </>
+                  );
+                })()}
               </div>
 
               {/* Investors list preview */}
@@ -968,8 +936,12 @@ export default function MarketplaceDetailPage() {
               {isOpen && (
                 <div className="mt-3 pt-3 border-t border-gray-100">
                   <div className="flex justify-between text-xs text-gray-500 mb-1">
+                    <span>Invoice Total</span>
+                    <span className="font-bold text-gray-800">₹{(detail.grand_total || detail.requested_amount).toLocaleString("en-IN")}</span>
+                  </div>
+                  <div className="flex justify-between text-xs text-gray-500 mb-1">
                     <span>Remaining</span>
-                    <span className="font-bold text-indigo-600">₹{(detail.remaining_amount || 0).toLocaleString("en-IN")}</span>
+                    <span className="font-bold text-indigo-600">₹{Math.max(0, (detail.grand_total || detail.requested_amount) - (detail.total_funded_amount || 0)).toLocaleString("en-IN")}</span>
                   </div>
                   <div className="flex justify-between text-xs text-gray-500">
                     <span>Min. Investment</span>
@@ -1479,7 +1451,7 @@ export default function MarketplaceDetailPage() {
                           ? "bg-white border border-gray-200 text-gray-800 rounded-bl-md shadow-sm"
                           : "bg-gray-200 text-gray-600 rounded-bl-md"
                       }`}>
-                        <p className="text-[13px] leading-relaxed whitespace-pre-wrap">{msg.message}</p>
+                        <p className="text-[13px] leading-relaxed whitespace-pre-wrap">{msg.message.replace(/\*\*/g, '')}</p>
                         {/* Offer details bar */}
                         {msg.offered_rate && (
                           <div className={`flex gap-3 mt-2 pt-2 text-[10px] ${

@@ -2,12 +2,12 @@
 Authentication routes — JWT + OTP 2FA.
 
 Flow:
-  1. Register → creates User + sends OTP via chosen channel (whatsapp/sms/email)
+  1. Register → creates User + sends OTP via email
   2. Verify OTP → returns JWT access + refresh tokens
-  3. Login → validates credentials + sends OTP
+  3. Login → validates credentials + sends OTP via email
   4. Verify OTP → returns JWT
 """
-from fastapi import APIRouter, Depends, HTTPException, Header
+from fastapi import APIRouter, Depends, HTTPException, Header, UploadFile, File, Form
 from sqlalchemy.orm import Session
 from pydantic import BaseModel, Field
 from typing import Optional, List
@@ -18,12 +18,18 @@ import random
 import json
 import re
 import time as _time
+import os
+import uuid
 
 from database import get_db
-from models import User, Vendor, Lender, Notification, ActivityLog, VerificationCheck
+from models import User, Vendor, Lender, Notification, ActivityLog, VerificationCheck, UserDocument
 from services.email_service import email_service
 
 router = APIRouter(prefix="/api/auth", tags=["auth"])
+
+import os as _os
+DOC_UPLOAD_DIR = "/tmp/uploads" if _os.environ.get("VERCEL") else "uploads"
+os.makedirs(DOC_UPLOAD_DIR, exist_ok=True)
 
 # ── Config ──
 SECRET_KEY = "invox-secret-key-change-in-production-2026"
@@ -51,7 +57,7 @@ class RegisterRequest(BaseModel):
     phone: str = Field(..., min_length=10, max_length=15)
     password: str = Field(..., min_length=6, max_length=100)
     role: str = Field(..., pattern="^(vendor|lender|admin)$")
-    otp_channel: str = Field(default="email", pattern="^(whatsapp|sms|email)$")
+    otp_channel: str = Field(default="email", pattern="^(email)$")
     # Lender extra fields
     organization: Optional[str] = None
     lender_type: Optional[str] = Field(default="individual")
@@ -64,7 +70,7 @@ class RegisterRequest(BaseModel):
 class LoginRequest(BaseModel):
     email: str
     password: str
-    otp_channel: str = Field(default="email", pattern="^(whatsapp|sms|email)$")
+    otp_channel: str = Field(default="email", pattern="^(email)$")
 
 
 class VerifyOTPRequest(BaseModel):
@@ -351,34 +357,29 @@ def generate_otp() -> str:
     return str(random.randint(100000, 999999))
 
 
-def send_otp(phone: str, email: str, otp: str, channel: str, user_name: str = "User"):
+def send_otp(phone: str, email: str, otp: str, channel: str = "email", user_name: str = "User"):
     """
-    Send OTP via the chosen channel.
-    - Email: sends a branded HTML email via Gmail API
-    - WhatsApp/SMS: console log (future integration)
+    Send OTP via email (Gmail SMTP).
     Always logs to console as backup.
     """
-    channel_icons = {"whatsapp": "📱 WhatsApp", "sms": "💬 SMS", "email": "📧 Email"}
-    target = phone if channel in ("whatsapp", "sms") else email
-
     # Console log (always, as backup/debug)
     print(f"\n{'='*50}")
-    print(f"  🔐 OTP SENT via {channel_icons.get(channel, channel)}")
-    print(f"  To: {target}")
+    print(f"  🔐 OTP SENT via 📧 Email")
+    print(f"  To: {email}")
     print(f"  OTP: {otp}")
     print(f"  Expires in {OTP_EXPIRE_MINUTES} minutes")
     print(f"{'='*50}\n")
 
-    # Real email delivery via Gmail API
-    if channel == "email" and email:
+    # Real email delivery via Gmail SMTP
+    if email:
         try:
             sent = email_service.send_otp_email(to=email, otp=otp, user_name=user_name)
             if sent:
                 print(f"  ✅ OTP email delivered to {email}")
             else:
-                print(f"  ⚠️  Gmail send returned False — OTP logged above")
+                print(f"  ⚠️  Email send returned False — OTP logged above")
         except Exception as exc:
-            print(f"  ❌ Gmail error: {exc} — OTP logged above")
+            print(f"  ❌ Email error: {exc} — OTP logged above")
 
 
 def create_access_token(data: dict, expires_delta: Optional[timedelta] = None):
@@ -443,6 +444,143 @@ def log_activity(db: Session, entity_type: str, entity_id: int, action: str, des
 
 
 # ═══════════════════════════════════════════════
+#  DOCUMENT UPLOAD (registration + post-login)
+# ═══════════════════════════════════════════════
+
+VALID_REG_DOC_TYPES = ["aadhaar_card", "pan_card", "gst_certificate"]
+VALID_POST_LOGIN_DOC_TYPES = ["bank_statement", "registration_certificate"]
+ALL_DOC_TYPES = VALID_REG_DOC_TYPES + VALID_POST_LOGIN_DOC_TYPES
+
+# Map UserDocument doc_type → Vendor column name
+DOC_TO_VENDOR_COL = {
+    "aadhaar_card": "business_aadhaar_doc",
+    "pan_card": "business_pan_doc",
+    "gst_certificate": "gst_certificate_doc",
+    "bank_statement": "bank_statement_doc",
+    "registration_certificate": "registration_certificate_doc",
+}
+
+
+@router.post("/upload-document")
+async def upload_registration_document(
+    email: str = Form(...),
+    doc_type: str = Form(...),
+    stage: str = Form(default="registration"),
+    file: UploadFile = File(...),
+    db: Session = Depends(get_db),
+):
+    """Upload a document during registration or post-login verification.
+    Stores file linked to user email; auto-links to vendor when created.
+    """
+    if doc_type not in ALL_DOC_TYPES:
+        raise HTTPException(status_code=400, detail=f"Invalid doc_type. Must be one of: {ALL_DOC_TYPES}")
+
+    if stage == "registration" and doc_type not in VALID_REG_DOC_TYPES:
+        raise HTTPException(status_code=400, detail=f"During registration, only these document types are allowed: {VALID_REG_DOC_TYPES}")
+
+    # Validate file type
+    allowed_extensions = [".pdf", ".jpg", ".jpeg", ".png"]
+    file_ext = os.path.splitext(file.filename or "file.bin")[1].lower()
+    if file_ext not in allowed_extensions:
+        raise HTTPException(status_code=400, detail="Only PDF, JPG, JPEG, PNG files are allowed")
+
+    # Max 10 MB
+    content = await file.read()
+    if len(content) > 10 * 1024 * 1024:
+        raise HTTPException(status_code=400, detail="File too large. Maximum 10MB.")
+
+    # Save file
+    file_id = uuid.uuid4().hex
+    safe_email = email.replace("@", "_at_").replace(".", "_")
+    file_path = os.path.join(DOC_UPLOAD_DIR, f"{safe_email}_{doc_type}_{file_id}{file_ext}")
+
+    with open(file_path, "wb") as f:
+        f.write(content)
+
+    # Remove any previous upload of same type for this email
+    existing = db.query(UserDocument).filter(
+        UserDocument.user_email == email,
+        UserDocument.doc_type == doc_type,
+    ).first()
+    if existing:
+        # Try to delete old file
+        try:
+            if os.path.exists(existing.file_path):
+                os.remove(existing.file_path)
+        except Exception:
+            pass
+        existing.file_path = file_path
+        existing.original_filename = file.filename
+        existing.upload_stage = stage
+    else:
+        doc = UserDocument(
+            user_email=email,
+            doc_type=doc_type,
+            file_path=file_path,
+            original_filename=file.filename,
+            upload_stage=stage,
+        )
+        db.add(doc)
+
+    # If vendor already exists (post-login upload), also update vendor column directly
+    user = db.query(User).filter(User.email == email).first()
+    if user and user.vendor_id:
+        vendor = db.query(Vendor).filter(Vendor.id == user.vendor_id).first()
+        if vendor:
+            col_name = DOC_TO_VENDOR_COL.get(doc_type)
+            if col_name:
+                setattr(vendor, col_name, file_path)
+
+    db.commit()
+
+    return {
+        "message": f"Document '{doc_type}' uploaded successfully",
+        "doc_type": doc_type,
+        "file_path": file_path,
+        "original_filename": file.filename,
+    }
+
+
+@router.get("/documents/{email_addr}")
+def get_user_documents(email_addr: str, db: Session = Depends(get_db)):
+    """Get all documents uploaded by a user (by email)."""
+    docs = db.query(UserDocument).filter(UserDocument.user_email == email_addr).all()
+    return [
+        {
+            "id": d.id,
+            "doc_type": d.doc_type,
+            "file_path": d.file_path,
+            "original_filename": d.original_filename,
+            "uploaded_at": d.uploaded_at.isoformat() if d.uploaded_at else None,
+            "upload_stage": d.upload_stage,
+            "linked_vendor_id": d.linked_vendor_id,
+        }
+        for d in docs
+    ]
+
+
+def _link_user_documents_to_vendor(db: Session, email: str, vendor_id: int):
+    """Link any pre-uploaded documents (from registration) to the newly created vendor."""
+    docs = db.query(UserDocument).filter(
+        UserDocument.user_email == email,
+        UserDocument.linked_vendor_id.is_(None),
+    ).all()
+
+    vendor = db.query(Vendor).filter(Vendor.id == vendor_id).first()
+    if not vendor:
+        return
+
+    for doc in docs:
+        doc.linked_vendor_id = vendor_id
+        col_name = DOC_TO_VENDOR_COL.get(doc.doc_type)
+        if col_name:
+            setattr(vendor, col_name, doc.file_path)
+            print(f"  📎 Linked {doc.doc_type} → vendor {vendor_id} ({col_name})")
+
+    db.flush()
+
+
+# ═══════════════════════════════════════════════
 #  AUTO VENDOR SETUP (runs during OTP verify)
 # ═══════════════════════════════════════════════
 
@@ -464,7 +602,10 @@ def _auto_create_vendor(db: Session, user: User, setup_data: dict) -> Optional[i
         # ── Check hardcoded templates first (instant, reliable) ──
         if is_hardcoded_gstin(gstin_upper):
             print(f"\n  🎯 Hardcoded template matched for GSTIN {gstin_upper}")
-            return create_hardcoded_vendor(db, user, gstin_upper)
+            vendor_id = create_hardcoded_vendor(db, user, gstin_upper)
+            if vendor_id:
+                _link_user_documents_to_vendor(db, user.email, vendor_id)
+            return vendor_id
 
         # ── Fallback: live Sandbox API flow ──
         from services.sandbox_client import search_gstin, verify_pan
@@ -601,6 +742,9 @@ def _auto_create_vendor(db: Session, user: User, setup_data: dict) -> Optional[i
         db_vendor = Vendor(**vendor_data)
         db.add(db_vendor)
         db.flush()
+
+        # ── Link uploaded registration documents to the new vendor ──
+        _link_user_documents_to_vendor(db, user.email, db_vendor.id)
 
         # Save verification checks
         for check in govt_result["checks"]:

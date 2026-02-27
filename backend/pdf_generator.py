@@ -10,6 +10,8 @@ from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, 
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.lib.enums import TA_CENTER, TA_RIGHT, TA_LEFT
 
+RUPEE = "Rs."
+
 
 def generate_invoice_pdf(invoice, vendor, items) -> bytes:
     """Generate a professional GST invoice PDF. Returns raw PDF bytes."""
@@ -92,19 +94,19 @@ def generate_invoice_pdf(invoice, vendor, items) -> bytes:
         if is_intra:
             rows.append([
                 str(idx), item.description, item.hsn_sac_code,
-                f"{item.quantity} {item.unit}", f"₹{item.unit_price:,.2f}",
-                f"₹{item.taxable_value:,.2f}",
-                f"₹{item.cgst_amount:,.2f} ({item.gst_rate / 2}%)",
-                f"₹{item.sgst_amount:,.2f} ({item.gst_rate / 2}%)",
-                f"₹{item.total_amount:,.2f}",
+                f"{item.quantity} {item.unit}", f"{RUPEE}{item.unit_price:,.2f}",
+                f"{RUPEE}{item.taxable_value:,.2f}",
+                f"{RUPEE}{item.cgst_amount:,.2f} ({item.gst_rate / 2}%)",
+                f"{RUPEE}{item.sgst_amount:,.2f} ({item.gst_rate / 2}%)",
+                f"{RUPEE}{item.total_amount:,.2f}",
             ])
         else:
             rows.append([
                 str(idx), item.description, item.hsn_sac_code,
-                f"{item.quantity} {item.unit}", f"₹{item.unit_price:,.2f}",
-                f"₹{item.taxable_value:,.2f}",
-                f"₹{item.igst_amount:,.2f} ({item.gst_rate}%)",
-                f"₹{item.total_amount:,.2f}",
+                f"{item.quantity} {item.unit}", f"{RUPEE}{item.unit_price:,.2f}",
+                f"{RUPEE}{item.taxable_value:,.2f}",
+                f"{RUPEE}{item.igst_amount:,.2f} ({item.gst_rate}%)",
+                f"{RUPEE}{item.total_amount:,.2f}",
             ])
 
     if is_intra:
@@ -131,20 +133,20 @@ def generate_invoice_pdf(invoice, vendor, items) -> bytes:
 
     # ── Summary ──
     summary_rows = [
-        ["Sub Total", f"₹{invoice.subtotal:,.2f}"],
+        ["Sub Total", f"{RUPEE}{invoice.subtotal:,.2f}"],
     ]
     if invoice.total_discount > 0:
-        summary_rows.append(["Discount", f"-₹{invoice.total_discount:,.2f}"])
+        summary_rows.append(["Discount", f"-{RUPEE}{invoice.total_discount:,.2f}"])
     if is_intra:
-        summary_rows.append(["Total CGST", f"₹{invoice.total_cgst:,.2f}"])
-        summary_rows.append(["Total SGST", f"₹{invoice.total_sgst:,.2f}"])
+        summary_rows.append(["Total CGST", f"{RUPEE}{invoice.total_cgst:,.2f}"])
+        summary_rows.append(["Total SGST", f"{RUPEE}{invoice.total_sgst:,.2f}"])
     else:
-        summary_rows.append(["Total IGST", f"₹{invoice.total_igst:,.2f}"])
+        summary_rows.append(["Total IGST", f"{RUPEE}{invoice.total_igst:,.2f}"])
     if invoice.total_cess > 0:
-        summary_rows.append(["Cess", f"₹{invoice.total_cess:,.2f}"])
+        summary_rows.append(["Cess", f"{RUPEE}{invoice.total_cess:,.2f}"])
     if invoice.round_off != 0:
-        summary_rows.append(["Round Off", f"₹{invoice.round_off:,.2f}"])
-    summary_rows.append(["GRAND TOTAL", f"₹{invoice.grand_total:,.2f}"])
+        summary_rows.append(["Round Off", f"{RUPEE}{invoice.round_off:,.2f}"])
+    summary_rows.append(["GRAND TOTAL", f"{RUPEE}{invoice.grand_total:,.2f}"])
 
     summary_table = Table(summary_rows, colWidths=[50 * mm, 40 * mm], hAlign="RIGHT")
     summary_table.setStyle(TableStyle([

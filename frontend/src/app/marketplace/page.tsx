@@ -23,14 +23,7 @@ const statusConfig: Record<string, { bg: string; text: string; dot: string; labe
   defaulted: { bg: "bg-red-50", text: "text-red-700", dot: "bg-red-500", label: "Defaulted" },
 };
 
-const riskMeter = (score: number | null) => {
-  const s = score ?? 50;
-  if (s <= 25) return { label: "Very Low", color: "text-emerald-600", bg: "bg-emerald-500", width: `${s}%`, ring: "ring-emerald-200" };
-  if (s <= 40) return { label: "Low", color: "text-green-600", bg: "bg-green-500", width: `${s}%`, ring: "ring-green-200" };
-  if (s <= 55) return { label: "Moderate", color: "text-yellow-600", bg: "bg-yellow-500", width: `${s}%`, ring: "ring-yellow-200" };
-  if (s <= 70) return { label: "High", color: "text-orange-600", bg: "bg-orange-500", width: `${s}%`, ring: "ring-orange-200" };
-  return { label: "Very High", color: "text-red-600", bg: "bg-red-500", width: `${s}%`, ring: "ring-red-200" };
-};
+
 
 const cibilGrade = (score: number | null) => {
   if (!score) return { grade: "N/A", color: "text-gray-400", bg: "bg-gray-100" };
@@ -53,12 +46,15 @@ const timeAgo = (dateStr: string | null) => {
 };
 
 const categoryIcons: Record<string, string> = {
-  "Textiles & Handloom": "🧵", "Food Processing": "🌾", "Leather & Footwear": "👜",
+  "Textiles & Handloom": "🧵", "Food Processing": "�", "Leather & Footwear": "👜",
   "Auto Components Manufacturing": "⚙️", "Garment & Knitwear Export": "👕",
   "IT & Software Services": "💻", "Pharmaceutical Manufacturing": "💊",
   "Steel & Metal Fabrication": "🔩", "Ceramics & Pottery": "🏺",
   "Electronics Manufacturing": "🔌", Manufacturing: "🏭", Trading: "📦",
   Services: "💼", Retail: "🛒", Construction: "🏗️",
+  "Tiffin & Catering": "🍱", "Street Food": "🍲", "Grocery & Kirana": "🏪",
+  "Tailoring & Alteration": "✂️", "Salon & Beauty": "💇", "Laundry": "👔",
+  "Printing & Stationery": "🖨️", "Auto Repair": "🔧", "Dairy & Milk": "🥛",
 };
 
 const gradientBgs = [
@@ -83,7 +79,7 @@ export default function MarketplacePage() {
   const [viewMode, setViewMode] = useState<"grid" | "list">("grid");
   const [advFilters, setAdvFilters] = useState({
     amount_min: "", amount_max: "", interest_min: "", interest_max: "",
-    risk_level: "", business_type: "", sort_by: "created_at", sort_order: "desc",
+    business_type: "", sort_by: "created_at", sort_order: "desc",
   });
 
   // Lender registration modal
@@ -98,7 +94,6 @@ export default function MarketplacePage() {
     if (advFilters.amount_max) params.set("amount_max", advFilters.amount_max);
     if (advFilters.interest_min) params.set("interest_min", advFilters.interest_min);
     if (advFilters.interest_max) params.set("interest_max", advFilters.interest_max);
-    if (advFilters.risk_level) params.set("risk_level", advFilters.risk_level);
     if (advFilters.business_type) params.set("business_type", advFilters.business_type);
     if (advFilters.sort_by) params.set("sort_by", advFilters.sort_by);
     if (advFilters.sort_order) params.set("sort_order", advFilters.sort_order);
@@ -282,7 +277,6 @@ export default function MarketplacePage() {
                 <option value="created_at">Newest First</option>
                 <option value="amount">Amount</option>
                 <option value="interest">Interest Rate</option>
-                <option value="risk">Risk Score</option>
               </select>
 
               {/* Advanced filter toggle */}
@@ -332,17 +326,6 @@ export default function MarketplacePage() {
                 </div>
               </div>
               <div>
-                <label className="block text-[10px] font-semibold text-gray-500 mb-1.5 uppercase tracking-wider">Risk Level</label>
-                <select value={advFilters.risk_level}
-                  onChange={(e) => setAdvFilters({ ...advFilters, risk_level: e.target.value })}
-                  className="w-full px-2.5 py-2 border border-gray-200 rounded-xl text-xs text-gray-900 bg-gray-50 focus:bg-white focus:ring-2 focus:ring-indigo-500 outline-none transition-all cursor-pointer">
-                  <option value="">All Levels</option>
-                  <option value="low">🟢 Low Risk</option>
-                  <option value="medium">🟡 Medium Risk</option>
-                  <option value="high">🔴 High Risk</option>
-                </select>
-              </div>
-              <div>
                 <label className="block text-[10px] font-semibold text-gray-500 mb-1.5 uppercase tracking-wider">Business Type</label>
                 <select value={advFilters.business_type}
                   onChange={(e) => setAdvFilters({ ...advFilters, business_type: e.target.value })}
@@ -359,7 +342,7 @@ export default function MarketplacePage() {
                   Apply Filters
                 </button>
                 <button onClick={() => {
-                  setAdvFilters({ amount_min: "", amount_max: "", interest_min: "", interest_max: "", risk_level: "", business_type: "", sort_by: "created_at", sort_order: "desc" });
+                  setAdvFilters({ amount_min: "", amount_max: "", interest_min: "", interest_max: "", business_type: "", sort_by: "created_at", sort_order: "desc" });
                   setFilter("");
                 }}
                   className="px-5 py-2 border border-gray-200 rounded-xl text-xs font-medium text-gray-600 hover:bg-gray-50 transition-colors">
@@ -401,7 +384,6 @@ export default function MarketplacePage() {
         ) : (
           <div className={viewMode === "grid" ? "grid sm:grid-cols-2 lg:grid-cols-3 gap-4" : "space-y-3"}>
             {filtered.map((l, idx) => {
-              const risk = riskMeter(l.risk_score);
               const cibil = cibilGrade(l.cibil_score);
               const st = statusConfig[l.listing_status] || statusConfig.open;
               const gradientIdx = idx % gradientBgs.length;
@@ -444,10 +426,12 @@ export default function MarketplacePage() {
                           <p className="text-lg font-bold text-green-600">{l.max_interest_rate}%</p>
                           <p className="text-[10px] text-gray-400 uppercase">Interest</p>
                         </div>
-                        <div className="text-center">
-                          <p className={`text-sm font-bold ${risk.color}`}>{l.risk_score?.toFixed(0) ?? "—"}/100</p>
-                          <p className="text-[10px] text-gray-400 uppercase">Risk</p>
-                        </div>
+                        {yearsInBiz !== null && (
+                          <div className="text-center">
+                            <p className="text-sm font-bold text-gray-700">{yearsInBiz}yr{yearsInBiz > 1 ? "s" : ""}</p>
+                            <p className="text-[10px] text-gray-400 uppercase">In Business</p>
+                          </div>
+                        )}
                         <ArrowUpRight className="w-5 h-5 text-gray-300 group-hover:text-indigo-500 transition-colors" />
                       </div>
                     </div>
@@ -521,25 +505,17 @@ export default function MarketplacePage() {
                           )}
                         </p>
                       </div>
-                      {/* CIBIL Badge */}
-                      <div className={`flex-shrink-0 px-2 py-1 rounded-lg text-center ${cibil.bg}`}>
-                        <p className={`text-xs font-bold ${cibil.color}`}>{l.cibil_score || "—"}</p>
-                        <p className="text-[9px] text-gray-400 uppercase">CIBIL</p>
-                      </div>
                     </div>
 
-                    {/* Business tags */}
-                    <div className="flex items-center gap-1.5 mb-3 flex-wrap">
-                      {l.business_category && (
-                        <span className="text-[10px] font-medium bg-gray-100 text-gray-600 px-2 py-0.5 rounded-md">{l.business_category}</span>
-                      )}
-                      {l.business_type && (
-                        <span className="text-[10px] font-medium bg-gray-100 text-gray-600 px-2 py-0.5 rounded-md">{l.business_type}</span>
-                      )}
-                      {yearsInBiz !== null && (
-                        <span className="text-[10px] font-medium bg-gray-100 text-gray-600 px-2 py-0.5 rounded-md">{yearsInBiz}yr{yearsInBiz > 1 ? "s" : ""} old</span>
-                      )}
-                    </div>
+                    {/* Business category tag */}
+                    {l.business_category && (
+                      <div className="flex items-center gap-1.5 mb-3">
+                        <span className="text-[10px] font-medium bg-gray-100 text-gray-600 px-2 py-0.5 rounded-md">{catIcon} {l.business_category}</span>
+                        {l.business_type && (
+                          <span className="text-[10px] font-medium bg-gray-100 text-gray-600 px-2 py-0.5 rounded-md">{l.business_type}</span>
+                        )}
+                      </div>
+                    )}
 
                     {/* Description snippet */}
                     {l.listing_title && (
@@ -569,15 +545,23 @@ export default function MarketplacePage() {
                       </div>
                     </div>
 
-                    {/* Risk Score Bar */}
-                    <div className="mb-3">
-                      <div className="flex items-center justify-between mb-1.5">
-                        <span className="text-[11px] font-medium text-gray-500">Risk Assessment</span>
-                        <span className={`text-[11px] font-bold ${risk.color}`}>{risk.label} · {l.risk_score?.toFixed(0) ?? "—"}/100</span>
-                      </div>
-                      <div className="w-full h-2 bg-gray-100 rounded-full overflow-hidden">
-                        <div className={`h-full rounded-full ${risk.bg} transition-all duration-700`} style={{ width: risk.width }} />
-                      </div>
+                    {/* Business Info Tags */}
+                    <div className="flex flex-wrap gap-1.5 mb-3">
+                      {l.profile_status === "verified" && (
+                        <span className="inline-flex items-center gap-1 text-[10px] font-medium bg-emerald-50 text-emerald-700 px-2 py-0.5 rounded-md">
+                          <BadgeCheck className="w-3 h-3" /> Udyam Verified
+                        </span>
+                      )}
+                      {yearsInBiz !== null && (
+                        <span className="text-[10px] font-medium bg-blue-50 text-blue-700 px-2 py-0.5 rounded-md">
+                          {yearsInBiz}+ yr{yearsInBiz > 1 ? "s" : ""} in business
+                        </span>
+                      )}
+                      {l.cibil_score && (
+                        <span className={`text-[10px] font-medium px-2 py-0.5 rounded-md ${cibil.bg} ${cibil.color}`}>
+                          CIBIL: {l.cibil_score} ({cibil.grade})
+                        </span>
+                      )}
                     </div>
 
                     {/* ── Community Pot Progress Bar ── */}

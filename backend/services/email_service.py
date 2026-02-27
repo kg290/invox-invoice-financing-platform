@@ -1,39 +1,31 @@
 """
-InvoX Email Service — Gmail API Integration
-Sends branded OTP verification emails via Gmail OAuth 2.0.
+InvoX Email Service — Gmail SMTP with App Password
+Sends branded OTP verification emails via Gmail SMTP.
 
-Adapted for server-side use:
-  - Authenticates once at import via token.json (no browser popup)
-  - Auto-refreshes expired tokens
-  - Graceful fallback to console logging if Gmail is unavailable
+Simple, reliable, no OAuth complexity.
 """
 
 import os
-import base64
+import smtplib
 import logging
+import uuid
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 from email.mime.application import MIMEApplication
+from email.utils import formatdate, formataddr, make_msgid
 from datetime import datetime
-
-from google.auth.transport.requests import Request
-from google.oauth2.credentials import Credentials
-from googleapiclient.discovery import build
-from googleapiclient.errors import HttpError
 
 logger = logging.getLogger("invox.email")
 
-# Gmail send-only scope
-_SCOPES = ["https://www.googleapis.com/auth/gmail.send"]
-
-# Resolve paths relative to this file → backend/services/ → backend/
-_BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-_CREDENTIALS_PATH = os.path.join(_BASE_DIR, "credentials.json")
-_TOKEN_PATH = os.path.join(_BASE_DIR, "token.json")
+# ── Configuration ────────────────────────────────
+GMAIL_ADDRESS = os.getenv("GMAIL_ADDRESS", "karnajeetgosavi2908@gmail.com")
+GMAIL_APP_PASSWORD = os.getenv("GMAIL_APP_PASSWORD", "anfm sljf kmcc psrx")
+SMTP_HOST = "smtp.gmail.com"
+SMTP_PORT = 587
 
 
 class EmailService:
-    """Singleton-style Gmail API wrapper for InvoX."""
+    """Gmail SMTP email sender for InvoX."""
 
     _instance = None
 
@@ -47,49 +39,31 @@ class EmailService:
         if self._initialized:
             return
         self._initialized = True
-        self._service = None
-        self._creds = None
         self._ready = False
-        self._sender_email = None
-        self._authenticate()
+        self._sender_email = GMAIL_ADDRESS
+        self._app_password = GMAIL_APP_PASSWORD
+        self._verify_config()
 
-    # ── Auth ──────────────────────────────────────────────
+    def _verify_config(self):
+        """Check that credentials are configured."""
+        if not self._sender_email or not self._app_password:
+            logger.warning("Gmail SMTP credentials not configured — email disabled")
+            return
 
-    def _authenticate(self):
-        """Load token.json, refresh if needed. Never opens a browser."""
+        if self._app_password == "your-app-password-here":
+            logger.warning("Gmail App Password not set — email disabled")
+            return
+
+        # Try a quick SMTP connection to validate
         try:
-            if not os.path.exists(_TOKEN_PATH):
-                logger.warning("token.json not found — email sending disabled")
-                return
-
-            self._creds = Credentials.from_authorized_user_file(_TOKEN_PATH, _SCOPES)
-
-            if not self._creds.valid:
-                if self._creds.expired and self._creds.refresh_token:
-                    self._creds.refresh(Request())
-                    # Persist refreshed token
-                    with open(_TOKEN_PATH, "w") as f:
-                        f.write(self._creds.to_json())
-                    logger.info("Gmail token refreshed successfully")
-                else:
-                    logger.warning("Gmail token invalid and cannot refresh — email disabled")
-                    return
-
-            self._service = build("gmail", "v1", credentials=self._creds)
-            self._sender_email = "noreply@invox.app"
-
-            # Try to get actual sender address (needs gmail.readonly scope)
-            try:
-                profile = self._service.users().getProfile(userId="me").execute()
-                self._sender_email = profile.get("emailAddress", self._sender_email)
-            except Exception:
-                pass  # send-only token — use default
-
+            with smtplib.SMTP(SMTP_HOST, SMTP_PORT, timeout=10) as server:
+                server.ehlo()
+                server.starttls()
+                server.login(self._sender_email, self._app_password)
             self._ready = True
-            logger.info(f"Gmail service ready — sending as {self._sender_email}")
-
+            logger.info(f"Gmail SMTP ready — sending as {self._sender_email}")
         except Exception as exc:
-            logger.error(f"Gmail authentication failed: {exc}")
+            logger.error(f"Gmail SMTP auth failed: {exc}")
             self._ready = False
 
     @property
@@ -98,69 +72,73 @@ class EmailService:
 
     # ── Send helpers ─────────────────────────────────────
 
-    def _send_raw(self, to: str, subject: str, html_body: str, attachment: tuple = None) -> dict | None:
-        """Low-level send via Gmail API. Optional attachment=(filename, bytes, mimetype)."""
+    def _send_raw(self, to: str, subject: str, html_body: str, plain_body: str = "", attachment: tuple = None) -> dict | None:
+        """Send email via SMTP with proper anti-spam headers.
+        Optional attachment=(filename, bytes, mimetype)."""
         if not self._ready:
             logger.warning("Email service not ready — skipping send")
             return None
 
-        msg = MIMEMultipart("mixed")
-        msg["to"] = to
-        msg["subject"] = subject
-        msg["from"] = f"InvoX <{self._sender_email}>"
-
-        # HTML body as alternative part
-        html_part = MIMEText(html_body, "html")
-        msg.attach(html_part)
-
-        # Optional attachment
+        # Build the message with proper structure
         if attachment:
+            msg = MIMEMultipart("mixed")
+            alt_part = MIMEMultipart("alternative")
+            alt_part.attach(MIMEText(plain_body or "Please view this email in an HTML-capable client.", "plain", "utf-8"))
+            alt_part.attach(MIMEText(html_body, "html", "utf-8"))
+            msg.attach(alt_part)
             fname, fbytes, fmimetype = attachment
             att = MIMEApplication(fbytes, _subtype=fmimetype.split("/")[-1] if "/" in fmimetype else "octet-stream")
             att.add_header("Content-Disposition", "attachment", filename=fname)
             msg.attach(att)
+        else:
+            msg = MIMEMultipart("alternative")
+            msg.attach(MIMEText(plain_body or "Please view this email in an HTML-capable client.", "plain", "utf-8"))
+            msg.attach(MIMEText(html_body, "html", "utf-8"))
 
-        raw = base64.urlsafe_b64encode(msg.as_bytes()).decode()
+        # Anti-spam: proper headers
+        msg["From"] = formataddr(("InvoX", self._sender_email))
+        msg["To"] = to
+        msg["Subject"] = subject
+        msg["Date"] = formatdate(localtime=True)
+        msg["Message-ID"] = make_msgid(domain="invox.app")
+        msg["Reply-To"] = self._sender_email
+        msg["X-Mailer"] = "InvoX-Platform/1.0"
 
         try:
-            result = self._service.users().messages().send(
-                userId="me", body={"raw": raw}
-            ).execute()
-            logger.info(f"Email sent to {to} — Message ID: {result['id']}")
-            return result
-        except HttpError as err:
-            logger.error(f"Gmail API error sending to {to}: {err}")
+            with smtplib.SMTP(SMTP_HOST, SMTP_PORT, timeout=30) as server:
+                server.ehlo()
+                server.starttls()
+                server.login(self._sender_email, self._app_password)
+                server.sendmail(self._sender_email, to, msg.as_string())
+            logger.info(f"Email sent to {to}")
+            return {"status": "sent", "to": to}
+        except Exception as exc:
+            logger.error(f"SMTP error sending to {to}: {exc}")
             return None
 
     # ── Public API ───────────────────────────────────────
 
     def send_otp_email(self, to: str, otp: str, user_name: str = "User") -> bool:
-        """
-        Send a branded OTP verification email.
-
-        Returns True if sent successfully, False otherwise.
-        """
-        subject = f"🔐 {otp} — Your InvoX Verification Code"
-
+        """Send a branded OTP verification email."""
+        subject = f"{otp} - Your InvoX Verification Code"
+        plain = f"Hello {user_name},\n\nYour InvoX verification code is: {otp}\n\nThis code expires in 5 minutes.\nIf you did not request this, please ignore this email.\n\n- InvoX Team"
         html = _OTP_TEMPLATE.format(
             user_name=user_name,
             otp=otp,
             year=datetime.now().year,
         )
-
-        result = self._send_raw(to, subject, html)
+        result = self._send_raw(to, subject, html, plain_body=plain)
         return result is not None
 
     def send_welcome_email(self, to: str, user_name: str = "User") -> bool:
         """Send a welcome email after successful registration."""
-        subject = "🎉 Welcome to InvoX — Invoice Financing Made Simple"
-
+        subject = "Welcome to InvoX - Invoice Financing Made Simple"
+        plain = f"Hello {user_name},\n\nWelcome to InvoX! Your account is verified and ready.\nYou can now upload invoices, explore the marketplace, and manage financing.\n\n- InvoX Team"
         html = _WELCOME_TEMPLATE.format(
             user_name=user_name,
             year=datetime.now().year,
         )
-
-        result = self._send_raw(to, subject, html)
+        result = self._send_raw(to, subject, html, plain_body=plain)
         return result is not None
 
     def send_invoice_email(
@@ -174,8 +152,8 @@ class EmailService:
         pdf_bytes: bytes,
     ) -> bool:
         """Send an invoice PDF to the buyer/client via email."""
-        subject = f"📄 Invoice {invoice_number} from {vendor_name}"
-
+        subject = f"Invoice {invoice_number} from {vendor_name}"
+        plain = f"Hello {buyer_name},\n\nYou have received Invoice {invoice_number} from {vendor_name}.\nAmount Due: INR {grand_total:,.2f}\nDue Date: {due_date}\n\nThe invoice PDF is attached.\n\n- InvoX Team"
         html = _INVOICE_EMAIL_TEMPLATE.format(
             buyer_name=buyer_name,
             vendor_name=vendor_name,
@@ -184,9 +162,8 @@ class EmailService:
             due_date=due_date,
             year=datetime.now().year,
         )
-
         attachment = (f"{invoice_number}.pdf", pdf_bytes, "application/pdf")
-        result = self._send_raw(to, subject, html, attachment=attachment)
+        result = self._send_raw(to, subject, html, plain_body=plain, attachment=attachment)
         return result is not None
 
 
@@ -368,5 +345,4 @@ _INVOICE_EMAIL_TEMPLATE = """
 
 
 # ── Module-level singleton ───────────────────────
-# Import this to use: `from services.email_service import email_service`
 email_service = EmailService()

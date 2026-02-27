@@ -34,6 +34,22 @@ class User(Base):
 
 
 # ════════════════════════════════════════════════
+#  USER DOCUMENTS (pre-vendor registration uploads)
+# ════════════════════════════════════════════════
+class UserDocument(Base):
+    __tablename__ = "user_documents"
+
+    id = Column(Integer, primary_key=True, index=True, autoincrement=True)
+    user_email = Column(String(200), nullable=False, index=True)  # linked by email before vendor exists
+    doc_type = Column(String(50), nullable=False)  # aadhaar_card, pan_card, gst_certificate, bank_statement, registration_certificate
+    file_path = Column(String(500), nullable=False)
+    original_filename = Column(String(255), nullable=True)
+    uploaded_at = Column(DateTime(timezone=True), server_default=func.now())
+    linked_vendor_id = Column(Integer, ForeignKey("vendors.id"), nullable=True)  # set after vendor creation
+    upload_stage = Column(String(20), nullable=False, default="registration")  # registration | post_login
+
+
+# ════════════════════════════════════════════════
 #  NOTIFICATION
 # ════════════════════════════════════════════════
 class Notification(Base):

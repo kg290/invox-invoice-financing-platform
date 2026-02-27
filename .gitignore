@@ -24,7 +24,11 @@ env/
 # ── Sensitive credentials & secrets ──
 .env
 .env.local
+.env.production
+.env.staging
 .env*.local
+.env*.production
+.env*.staging
 credentials.json
 token.json
 *.json.key
@@ -33,8 +37,22 @@ backend/credentials.json
 backend/token.json
 backend/kg-hackathon-*.json
 telegram-bot-package/ocr-service/kg-hackathon-*.json
+telegram-bot-package/bot/token.json
 "Gmail integration/Gmail integration/credentials.json"
 "Gmail integration/Gmail integration/token.json"
+
+# ── Telegram bot tokens ──
+**/bot_token*.txt
+**/telegram_token*
+**/TELEGRAM_BOT_TOKEN*
+
+# ── API keys & secrets ──
+**/api_keys.json
+**/secrets.json
+**/*.pem
+**/*.p12
+**/*.pfx
+service-account*.json
 
 # ── Test & one-off scripts ──
 backend/fetch_test_data*.py
