@@ -1,4 +1,8 @@
-# Python
+# ════════════════════════════════════════════════
+#  InvoX — .gitignore
+# ════════════════════════════════════════════════
+
+# ── Python ──
 __pycache__/
 *.py[cod]
 *.pyo
@@ -12,7 +16,15 @@ build/
 venv/
 env/
 
-# Sensitive credentials
+# ── Databases ──
+*.db
+*.sqlite
+*.sqlite3
+
+# ── Sensitive credentials & secrets ──
+.env
+.env.local
+.env*.local
 credentials.json
 token.json
 *.json.key
@@ -20,27 +32,42 @@ kg-hackathon-*.json
 backend/credentials.json
 backend/token.json
 backend/kg-hackathon-*.json
+telegram-bot-package/ocr-service/kg-hackathon-*.json
 "Gmail integration/Gmail integration/credentials.json"
 "Gmail integration/Gmail integration/token.json"
 
-# Node
+# ── Test & one-off scripts ──
+backend/fetch_test_data*.py
+backend/verify_pans.py
+backend/sandbox_results.json
+backend/test_*.py
+backend/test_integration.py
+backend/test_all_features.py
+backend/test_e2e.py
+backend/test_fixes.py
+
+# ── Migration / one-time scripts ──
+backend/migrate_*.py
+backend/add_lender_cols.py
+
+# ── Telegram bot auto-managed cache ──
+telegram-bot-package/bot/user_map.json
+
+# ── Node ──
 node_modules/
 .next/
 out/
-.env
-.env.local
-.env*.local
 
-# Uploads
+# ── Uploads (user content) ──
 uploads/
 
-# IDE
+# ── IDE ──
 .vscode/
 .idea/
 
-# OS
+# ── OS ──
 .DS_Store
 Thumbs.db
 
-# Logs
+# ── Logs ──
 *.log

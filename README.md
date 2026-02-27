@@ -69,6 +69,29 @@ Powered by Google Gemini, an autonomous AI agent negotiates interest rates on be
 #### 📧 Gmail Integration
 Forward invoices via email for automatic extraction and processing. PDF attachments are parsed, invoice data is extracted, and financing can be triggered with zero manual upload.
 
+#### 🤖 Telegram Bot
+A full-featured Telegram bot (`invox_bot.py`) lets vendors and lenders manage their invoices on the go:
+- Link Telegram account to InvoX profile via `/start`
+- Upload invoice photos/PDFs directly in-chat for automatic OCR processing
+- Receive real-time funding alerts, OTP codes, and repayment reminders
+- Check invoice status, marketplace listings, and credit score via simple commands
+- Lenders receive instant notifications when new invoices matching their criteria are listed
+
+#### 🔍 Google Cloud Vision OCR Service
+A dedicated FastAPI microservice (port 8001) powered by Google Cloud Vision API:
+- Extracts invoice fields (amount, GSTIN, invoice number, line items, dates) from photos and PDFs
+- Image preprocessing: grayscale conversion, deskewing, binarization for cleaner reads
+- Regex-based pattern matching tuned for Indian invoice formats (HSN codes, GSTIN, Indian currencies)
+- Automatically creates invoice drafts in the backend after successful OCR extraction
+- Runs as a standalone Docker container, callable from main backend or Telegram bot
+
+#### 💬 In-App Chat / Messaging
+Direct messaging between vendors and lenders:
+- Start conversations linked to specific marketplace listings or invoices
+- Real-time message threads with read receipts and unread counts
+- Enables negotiation, Q&A, and deal discussion without leaving the platform
+- Full conversation history per listing
+
 ---
 
 ## Tech Stack
@@ -112,7 +135,9 @@ Forward invoices via email for automatic extraction and processing. PDF attachme
 |-----|---------|
 | **Sandbox.co.in** | Live GSTIN verification, GST compliance checks |
 | **Google Gemini** | AI-powered negotiation agent |
+| **Google Cloud Vision** | OCR invoice extraction from images/PDFs |
 | **Gmail API** | Email invoice ingestion |
+| **Telegram Bot API** | Mobile bot for invoice management & notifications |
 
 ---
 
@@ -310,6 +335,22 @@ Interactive docs available at **http://localhost:8000/docs** (Swagger UI).
 |--------|----------|-------------|
 | POST | `/ai-negotiator/negotiate` | Start AI-powered rate negotiation |
 
+### Chat / Messaging
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| POST | `/chat/start` | Start a conversation with a vendor/lender |
+| GET | `/chat/conversations` | List all conversations for current user |
+| GET | `/chat/{conversation_id}/messages` | Get messages in a conversation |
+| POST | `/chat/{conversation_id}/send` | Send a message |
+| GET | `/chat/unread-count` | Get total unread message count |
+
+### Telegram
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| POST | `/telegram/webhook` | Telegram bot webhook receiver |
+| POST | `/telegram/link` | Link Telegram account to InvoX profile |
+| POST | `/telegram/upload-invoice` | Upload invoice via Telegram bot |
+
 ---
 
 ## Project Structure
@@ -365,9 +406,16 @@ Interactive docs available at **http://localhost:8000/docs** (Swagger UI).
 │           ├── types.ts         # TypeScript interfaces
 │           └── validation.ts    # Zod schemas
 ├── Gmail integration/           # Email-based invoice ingestion
+├── telegram-bot-package/        # Standalone Telegram bot integration
+│   ├── bot/invox_bot.py         # Main Telegram bot script (1100+ lines)
+│   ├── backend-routes/          # FastAPI routes for Telegram webhooks
+│   ├── backend-services/        # Telegram notification service
+│   └── ocr-service/             # Google Cloud Vision OCR microservice
 ├── docker-compose.yml           # Full-stack orchestration
 ├── deploy-gcp.sh               # Google Cloud Run deployment
-└── deploy-gcp.ps1              # GCP deployment (PowerShell)
+├── deploy-gcp.ps1              # GCP deployment (PowerShell)
+├── start.ps1                   # Quick-start script (backend + frontend)
+└── run_bot.ps1                 # Start Telegram bot (Windows)
 ```
 
 ---
