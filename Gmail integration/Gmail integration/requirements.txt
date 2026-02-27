@@ -1,0 +1,13 @@
+# Gmail API dependencies
+google-api-python-client>=2.100.0
+google-auth-httplib2>=0.1.1
+google-auth-oauthlib>=1.1.0
+
+# Reddit API dependencies
+praw>=7.7.0
+
+# Environment variables
+python-dotenv>=1.0.0
+
+# Optional - for scheduling posts/emails
+# schedule>=1.2.0

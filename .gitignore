@@ -1,0 +1,46 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.Python
+*.egg
+*.egg-info/
+dist/
+build/
+.venv/
+venv/
+env/
+
+# Sensitive credentials
+credentials.json
+token.json
+*.json.key
+kg-hackathon-*.json
+backend/credentials.json
+backend/token.json
+backend/kg-hackathon-*.json
+"Gmail integration/Gmail integration/credentials.json"
+"Gmail integration/Gmail integration/token.json"
+
+# Node
+node_modules/
+.next/
+out/
+.env
+.env.local
+.env*.local
+
+# Uploads
+uploads/
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log

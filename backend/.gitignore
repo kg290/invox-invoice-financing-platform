@@ -1,0 +1,16 @@
+# Credentials (OAuth tokens — never commit)
+credentials.json
+token.json
+
+# Database
+*.db
+
+# Python
+__pycache__/
+*.pyc
+venv/
+.env
+
+# IDE
+.vscode/
+.vercel

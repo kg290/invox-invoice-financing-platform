@@ -1,0 +1,66 @@
+# ═══════════════════════════════════════════════
+#  InvoX — Docker Compose (Full Stack)
+# ═══════════════════════════════════════════════
+#  Usage:
+#    docker-compose up --build        # Build & start all services
+#    docker-compose up -d             # Start in detached mode
+#    docker-compose down              # Stop all services
+#    docker-compose logs -f           # View logs
+# ═══════════════════════════════════════════════
+
+services:
+  # ── Backend (FastAPI + SQLite) ──
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: invox-backend
+    ports:
+      - "8000:8000"
+    environment:
+      - FRONTEND_URL=http://localhost:3000
+      - INVOX_PAY_SECRET=invox_pay_secret_k4x9m2p7q1w8e5
+      - BLOCK_SIGNING_KEY=invox_chain_sign_k9x2m7p4q1w8e5r3
+      - ENCRYPTION_KEY=invox_encrypt_a5b3c8d2e7f1g4h6
+      - JWT_SECRET=invox-secret-key-change-in-production-2026
+    volumes:
+      - backend-data:/app/data
+      - backend-uploads:/app/uploads
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+    networks:
+      - invox-network
+
+  # ── Frontend (Next.js) ──
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      args:
+        - NEXT_PUBLIC_API_URL=http://localhost:8000/api
+    container_name: invox-frontend
+    ports:
+      - "3000:3000"
+    environment:
+      - NEXT_PUBLIC_API_URL=http://localhost:8000/api
+    depends_on:
+      backend:
+        condition: service_healthy
+    restart: unless-stopped
+    networks:
+      - invox-network
+
+volumes:
+  backend-data:
+    driver: local
+  backend-uploads:
+    driver: local
+
+networks:
+  invox-network:
+    driver: bridge

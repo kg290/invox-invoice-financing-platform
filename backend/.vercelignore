@@ -1,0 +1,7 @@
+__pycache__
+*.pyc
+venv/
+.venv/
+invox.db
+uploads/
+.env
