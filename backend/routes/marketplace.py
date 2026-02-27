@@ -21,7 +21,7 @@ import uuid
 import json
 
 from database import get_db
-from models import Invoice, InvoiceItem, MarketplaceListing, Vendor, Lender, BlockchainBlock, RepaymentSchedule, Notification, ActivityLog, User
+from models import Invoice, InvoiceItem, MarketplaceListing, Vendor, Lender, BlockchainBlock, RepaymentSchedule, Notification, ActivityLog, User, FractionalInvestment
 from blockchain import add_block, validate_chain, hash_data
 from pdf_generator import generate_invoice_pdf
 from routes.auth import get_current_user
@@ -186,6 +186,13 @@ class MarketplaceBrowseItem(BaseModel):
     funded_amount: Optional[float] = None
     total_funded_deals: Optional[int] = 0
 
+    # ── Community Pot / Fractional Funding ──
+    total_funded_amount: float = 0
+    total_investors: int = 0
+    min_investment: float = 500
+    funding_progress_pct: float = 0         # 0-100 percentage funded
+    remaining_amount: float = 0              # How much is left to fund
+
     class Config:
         from_attributes = True
 
@@ -251,6 +258,14 @@ class MarketplaceDetailItem(BaseModel):
     funded_amount: Optional[float] = None
     funded_by: Optional[str] = None
     funded_at: Optional[str] = None
+
+    # ── Community Pot / Fractional Funding ──
+    total_funded_amount: float = 0
+    total_investors: int = 0
+    min_investment: float = 500
+    funding_progress_pct: float = 0         # 0-100 percentage funded
+    remaining_amount: float = 0
+    investors: Optional[list] = None         # List of fractional investor dicts
 
     created_at: Optional[str] = None
 
@@ -550,6 +565,12 @@ def browse_listings(
             created_at=listing.created_at.isoformat() if listing.created_at else None,
             funded_amount=listing.funded_amount,
             total_funded_deals=total_funded,
+            # Community Pot fields
+            total_funded_amount=listing.total_funded_amount or 0,
+            total_investors=listing.total_investors or 0,
+            min_investment=listing.min_investment or 500,
+            funding_progress_pct=round((listing.total_funded_amount or 0) / listing.requested_amount * 100, 1) if listing.requested_amount > 0 else 0,
+            remaining_amount=max(0, listing.requested_amount - (listing.total_funded_amount or 0)),
         ))
 
     return results
@@ -586,6 +607,29 @@ def get_listing_detail(listing_id: int, db: Session = Depends(get_db), current_u
         risk = _compute_risk_score(vendor)
         listing.risk_score = risk
         db.commit()
+
+    # ── Fetch fractional investors for this listing ──
+    frac_investments = db.query(FractionalInvestment).filter(
+        FractionalInvestment.listing_id == listing.id,
+        FractionalInvestment.status == "active",
+    ).order_by(FractionalInvestment.invested_at.desc()).all()
+
+    investors_list = []
+    for fi in frac_investments:
+        inv_lender = db.query(Lender).filter(Lender.id == fi.lender_id).first()
+        investors_list.append({
+            "id": fi.id,
+            "lender_id": fi.lender_id,
+            "lender_name": inv_lender.name if inv_lender else "Anonymous",
+            "lender_type": inv_lender.lender_type if inv_lender else "individual",
+            "organization": inv_lender.organization if inv_lender else None,
+            "invested_amount": fi.invested_amount,
+            "offered_interest_rate": fi.offered_interest_rate,
+            "ownership_percentage": fi.ownership_percentage,
+            "expected_return": fi.expected_return,
+            "invested_at": fi.invested_at.isoformat() if fi.invested_at else None,
+            "blockchain_hash": fi.blockchain_hash,
+        })
 
     return MarketplaceDetailItem(
         id=listing.id,
@@ -635,6 +679,13 @@ def get_listing_detail(listing_id: int, db: Session = Depends(get_db), current_u
         funded_amount=listing.funded_amount,
         funded_by=listing.funded_by,
         funded_at=listing.funded_at.isoformat() if listing.funded_at else None,
+        # Community Pot fields
+        total_funded_amount=listing.total_funded_amount or 0,
+        total_investors=listing.total_investors or 0,
+        min_investment=listing.min_investment or 500,
+        funding_progress_pct=round((listing.total_funded_amount or 0) / listing.requested_amount * 100, 1) if listing.requested_amount > 0 else 0,
+        remaining_amount=max(0, listing.requested_amount - (listing.total_funded_amount or 0)),
+        investors=investors_list,
         created_at=listing.created_at.isoformat() if listing.created_at else None,
     )
 
@@ -736,7 +787,10 @@ def request_gst_filings(listing_id: int, db: Session = Depends(get_db), current_
 
 @router.post("/fund/{listing_id}")
 def fund_listing(listing_id: int, data: FundListingRequest, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
-    """Lender funds a marketplace listing."""
+    """
+    Fractional / Community Pot funding — any lender can fund a *slice* of an invoice.
+    Multiple investors can fund pieces until the listing is fully funded.
+    """
     # Only lenders can fund listings
     if current_user.role != "lender":
         raise HTTPException(status_code=403, detail="Only lenders can fund marketplace listings")
@@ -745,11 +799,16 @@ def fund_listing(listing_id: int, data: FundListingRequest, db: Session = Depend
     if not listing:
         raise HTTPException(status_code=404, detail="Listing not found")
 
-    if listing.listing_status != "open":
+    if listing.listing_status not in ("open", "partially_funded"):
         raise HTTPException(status_code=400, detail=f"Listing is '{listing.listing_status}', not open for funding")
 
-    if data.funded_amount > listing.requested_amount:
-        raise HTTPException(status_code=400, detail="Funded amount exceeds requested amount")
+    remaining = listing.requested_amount - (listing.total_funded_amount or 0)
+    if data.funded_amount > remaining + 0.01:  # small float tolerance
+        raise HTTPException(status_code=400, detail=f"Amount ₹{data.funded_amount:,.0f} exceeds remaining ₹{remaining:,.0f}")
+
+    min_inv = listing.min_investment or 500
+    if data.funded_amount < min_inv and data.funded_amount < remaining:
+        raise HTTPException(status_code=400, detail=f"Minimum investment is ₹{min_inv:,.0f}")
 
     if data.offered_interest_rate > listing.max_interest_rate:
         raise HTTPException(status_code=400, detail=f"Offered interest rate ({data.offered_interest_rate}%) exceeds vendor's max ({listing.max_interest_rate}%)")
@@ -758,63 +817,113 @@ def fund_listing(listing_id: int, data: FundListingRequest, db: Session = Depend
     if not lender:
         raise HTTPException(status_code=404, detail="Lender not found")
 
-    listing.listing_status = "funded"
-    listing.funded_amount = data.funded_amount
-    listing.funded_by = lender.name
-    listing.lender_id = lender.id
-    listing.funded_at = datetime.now(timezone.utc)
-
     invoice = db.query(Invoice).filter(Invoice.id == listing.invoice_id).first()
+
+    # ── Create FractionalInvestment record ──
+    ownership_pct = round((data.funded_amount / listing.requested_amount) * 100, 2)
+    expected_return = round((data.funded_amount * data.offered_interest_rate / 100) * (listing.repayment_period_days / 365), 2)
+
     block_data = {
-        "type": "funding",
+        "type": "fractional_funding",
         "listing_id": listing_id,
         "invoice_number": invoice.invoice_number if invoice else "",
         "lender_id": lender.id,
         "lender_name": lender.name,
         "funded_amount": data.funded_amount,
+        "ownership_pct": ownership_pct,
         "offered_interest_rate": data.offered_interest_rate,
         "funded_at": datetime.now(timezone.utc).isoformat(),
     }
     block = add_block(db, "funding", block_data)
 
-    # ── Generate repayment schedule ──
-    from datetime import date
-    num_installments = max(1, listing.repayment_period_days // 30)
-    principal_per = round(data.funded_amount / num_installments, 2)
-    annual_rate = data.offered_interest_rate / 100
-    for i in range(1, num_installments + 1):
-        due = datetime.now(timezone.utc) + timedelta(days=30 * i)
-        interest_amt = round((data.funded_amount * annual_rate * 30) / 365, 2)
-        sched = RepaymentSchedule(
-            listing_id=listing_id,
-            installment_number=i,
-            due_date=due.strftime("%Y-%m-%d"),
-            principal_amount=principal_per,
-            interest_amount=interest_amt,
-            total_amount=round(principal_per + interest_amt, 2),
-            status="pending",
-        )
-        db.add(sched)
+    frac = FractionalInvestment(
+        listing_id=listing_id,
+        lender_id=lender.id,
+        user_id=current_user.id,
+        invested_amount=data.funded_amount,
+        offered_interest_rate=data.offered_interest_rate,
+        ownership_percentage=ownership_pct,
+        expected_return=expected_return,
+        blockchain_hash=block.block_hash,
+        status="active",
+    )
+    db.add(frac)
 
-    # ── Create notifications ──
-    # Notify vendor
-    vendor_user = db.query(User).filter(User.vendor_id == listing.vendor_id).first()
-    if vendor_user:
-        db.add(Notification(
-            user_id=vendor_user.id,
-            title="Invoice Funded! 🎉",
-            message=f"Your invoice has been funded ₹{data.funded_amount:,.0f} by {lender.name} at {data.offered_interest_rate}% interest.",
-            notification_type="funding",
-            link=f"/vendor/{listing.vendor_id}/invoices",
-        ))
+    # ── Update listing aggregates ──
+    new_total = (listing.total_funded_amount or 0) + data.funded_amount
+    listing.total_funded_amount = round(new_total, 2)
+    listing.total_investors = (listing.total_investors or 0) + 1
+
+    # Check if listing is now fully funded
+    fully_funded = new_total >= listing.requested_amount - 0.01
+    if fully_funded:
+        listing.listing_status = "funded"
+        listing.funded_amount = round(new_total, 2)
+        listing.funded_at = datetime.now(timezone.utc)
+        # For backwards compat, set lender_id to last funder if single investor
+        if listing.total_investors == 1:
+            listing.lender_id = lender.id
+            listing.funded_by = lender.name
+        else:
+            listing.funded_by = f"{listing.total_investors} investors"
+
+        # ── Generate repayment schedule (weighted average rate) ──
+        all_fracs = db.query(FractionalInvestment).filter(
+            FractionalInvestment.listing_id == listing_id,
+            FractionalInvestment.status == "active",
+        ).all()
+        # Weighted average interest rate across all investors
+        total_weighted_rate = sum(f.invested_amount * f.offered_interest_rate for f in all_fracs)
+        avg_rate = total_weighted_rate / new_total if new_total > 0 else data.offered_interest_rate
+
+        num_installments = max(1, listing.repayment_period_days // 30)
+        principal_per = round(new_total / num_installments, 2)
+        annual_rate = avg_rate / 100
+        for i in range(1, num_installments + 1):
+            due = datetime.now(timezone.utc) + timedelta(days=30 * i)
+            interest_amt = round((new_total * annual_rate * 30) / 365, 2)
+            sched = RepaymentSchedule(
+                listing_id=listing_id,
+                installment_number=i,
+                due_date=due.strftime("%Y-%m-%d"),
+                principal_amount=principal_per,
+                interest_amount=interest_amt,
+                total_amount=round(principal_per + interest_amt, 2),
+                status="pending",
+            )
+            db.add(sched)
+
+        # Notify vendor — fully funded
+        vendor_user = db.query(User).filter(User.vendor_id == listing.vendor_id).first()
+        if vendor_user:
+            db.add(Notification(
+                user_id=vendor_user.id,
+                title="Invoice Fully Funded! 🎉",
+                message=f"Your invoice has been fully funded ₹{new_total:,.0f} by {listing.total_investors} investor(s). Repayment in {num_installments} installments.",
+                notification_type="funding",
+                link=f"/vendor/{listing.vendor_id}/invoices",
+            ))
+    else:
+        listing.listing_status = "partially_funded"
+        # Notify vendor — partial funding
+        vendor_user = db.query(User).filter(User.vendor_id == listing.vendor_id).first()
+        if vendor_user:
+            pct = round(new_total / listing.requested_amount * 100, 1)
+            db.add(Notification(
+                user_id=vendor_user.id,
+                title="New Investment Received! 💰",
+                message=f"{lender.name} invested ₹{data.funded_amount:,.0f} in your invoice ({pct}% funded, {listing.total_investors} investor(s)).",
+                notification_type="funding",
+                link=f"/vendor/{listing.vendor_id}/invoices",
+            ))
 
     # Notify lender
     lender_user = db.query(User).filter(User.lender_id == lender.id).first()
     if lender_user:
         db.add(Notification(
             user_id=lender_user.id,
-            title="Funding Confirmed",
-            message=f"You funded ₹{data.funded_amount:,.0f} on invoice {invoice.invoice_number if invoice else ''}. Repayment in {num_installments} installments.",
+            title="Investment Confirmed ✅",
+            message=f"You invested ₹{data.funded_amount:,.0f} ({ownership_pct}% ownership) in invoice {invoice.invoice_number if invoice else ''}. Expected return: ₹{expected_return:,.0f}.",
             notification_type="funding",
             link=f"/marketplace/{listing_id}",
         ))
@@ -823,23 +932,109 @@ def fund_listing(listing_id: int, data: FundListingRequest, db: Session = Depend
     import json as json_mod
     db.add(ActivityLog(
         entity_type="listing", entity_id=listing_id,
-        action="funded",
-        description=f"Listing funded ₹{data.funded_amount:,.0f} by {lender.name} at {data.offered_interest_rate}%",
-        metadata_json=json_mod.dumps({"lender_id": lender.id, "amount": data.funded_amount}),
+        action="fractional_funded",
+        description=f"₹{data.funded_amount:,.0f} invested by {lender.name} ({ownership_pct}% slice) at {data.offered_interest_rate}%",
+        metadata_json=json_mod.dumps({
+            "lender_id": lender.id,
+            "amount": data.funded_amount,
+            "ownership_pct": ownership_pct,
+            "total_funded": new_total,
+            "total_investors": listing.total_investors,
+        }),
     ))
 
     db.commit()
     return {
-        "message": "Listing funded successfully",
-        "funded_amount": data.funded_amount,
+        "message": "Investment recorded successfully" if not fully_funded else "Listing fully funded!",
+        "invested_amount": data.funded_amount,
+        "ownership_percentage": ownership_pct,
+        "expected_return": expected_return,
         "lender": lender.name,
         "blockchain_hash": block.block_hash,
+        "total_funded_amount": listing.total_funded_amount,
+        "total_investors": listing.total_investors,
+        "funding_progress_pct": round(new_total / listing.requested_amount * 100, 1),
+        "remaining_amount": max(0, listing.requested_amount - new_total),
+        "fully_funded": fully_funded,
+    }
+
+
+# ═══════════════════════════════════════════════
+#  COMMUNITY POT — INVESTOR ENDPOINTS
+# ═══════════════════════════════════════════════
+
+@router.get("/listings/{listing_id}/investors")
+def get_listing_investors(listing_id: int, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+    """Get all fractional investors for a listing."""
+    listing = db.query(MarketplaceListing).filter(MarketplaceListing.id == listing_id).first()
+    if not listing:
+        raise HTTPException(status_code=404, detail="Listing not found")
+
+    investments = db.query(FractionalInvestment).filter(
+        FractionalInvestment.listing_id == listing_id,
+        FractionalInvestment.status == "active",
+    ).order_by(FractionalInvestment.invested_at.desc()).all()
+
+    investors = []
+    for fi in investments:
+        inv_lender = db.query(Lender).filter(Lender.id == fi.lender_id).first()
+        investors.append({
+            "id": fi.id,
+            "lender_id": fi.lender_id,
+            "lender_name": inv_lender.name if inv_lender else "Anonymous",
+            "lender_type": inv_lender.lender_type if inv_lender else "individual",
+            "organization": inv_lender.organization if inv_lender else None,
+            "invested_amount": fi.invested_amount,
+            "offered_interest_rate": fi.offered_interest_rate,
+            "ownership_percentage": fi.ownership_percentage,
+            "expected_return": fi.expected_return,
+            "invested_at": fi.invested_at.isoformat() if fi.invested_at else None,
+            "blockchain_hash": fi.blockchain_hash,
+            "status": fi.status,
+        })
+
+    return {
+        "listing_id": listing_id,
+        "total_funded_amount": listing.total_funded_amount or 0,
+        "total_investors": listing.total_investors or 0,
+        "requested_amount": listing.requested_amount,
+        "funding_progress_pct": round((listing.total_funded_amount or 0) / listing.requested_amount * 100, 1) if listing.requested_amount > 0 else 0,
+        "remaining_amount": max(0, listing.requested_amount - (listing.total_funded_amount or 0)),
+        "investors": investors,
+    }
+
+
+@router.get("/listings/{listing_id}/funding-progress")
+def get_funding_progress(listing_id: int, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+    """Quick endpoint for funding progress (for live updates)."""
+    listing = db.query(MarketplaceListing).filter(MarketplaceListing.id == listing_id).first()
+    if not listing:
+        raise HTTPException(status_code=404, detail="Listing not found")
+
+    return {
+        "listing_id": listing_id,
+        "listing_status": listing.listing_status,
+        "requested_amount": listing.requested_amount,
+        "total_funded_amount": listing.total_funded_amount or 0,
+        "total_investors": listing.total_investors or 0,
+        "funding_progress_pct": round((listing.total_funded_amount or 0) / listing.requested_amount * 100, 1) if listing.requested_amount > 0 else 0,
+        "remaining_amount": max(0, listing.requested_amount - (listing.total_funded_amount or 0)),
+        "min_investment": listing.min_investment or 500,
     }
 
 
 @router.post("/settle/{listing_id}")
 def settle_listing(listing_id: int, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
     """Mark a listing as settled."""
+    # Only admin or the vendor who owns the listing can settle
+    if current_user.role not in ("admin",):
+        if current_user.role == "vendor":
+            listing_check = db.query(MarketplaceListing).filter(MarketplaceListing.id == listing_id).first()
+            if not listing_check or listing_check.vendor_id != current_user.vendor_id:
+                raise HTTPException(status_code=403, detail="Not authorized to settle this listing")
+        else:
+            raise HTTPException(status_code=403, detail="Only vendors or admins can settle listings")
+
     listing = db.query(MarketplaceListing).filter(MarketplaceListing.id == listing_id).first()
     if not listing:
         raise HTTPException(status_code=404, detail="Listing not found")
@@ -891,9 +1086,19 @@ def download_smart_contract_pdf(listing_id: int, db: Session = Depends(get_db), 
     if not vendor:
         raise HTTPException(status_code=404, detail="Vendor not found")
 
-    lender = db.query(Lender).filter(Lender.id == listing.lender_id).first()
+    # For Community Pot listings, lender_id may be None — use the first/largest investor
+    lender = None
+    if listing.lender_id:
+        lender = db.query(Lender).filter(Lender.id == listing.lender_id).first()
     if not lender:
-        raise HTTPException(status_code=404, detail="Lender not found")
+        # Fallback: get the largest fractional investor
+        frac = db.query(FractionalInvestment).filter(
+            FractionalInvestment.listing_id == listing_id
+        ).order_by(FractionalInvestment.invested_amount.desc()).first()
+        if frac:
+            lender = db.query(Lender).filter(Lender.id == frac.lender_id).first()
+    if not lender:
+        raise HTTPException(status_code=400, detail="No lender found for this listing")
 
     items = db.query(InvoiceItem).filter(InvoiceItem.invoice_id == invoice.id).order_by(InvoiceItem.item_number).all()
     repayments = db.query(RepaymentSchedule).filter(RepaymentSchedule.listing_id == listing_id).order_by(RepaymentSchedule.installment_number).all()
@@ -913,6 +1118,60 @@ def download_smart_contract_pdf(listing_id: int, db: Session = Depends(get_db), 
         media_type="application/pdf",
         headers={"Content-Disposition": f'attachment; filename="{filename}"'},
     )
+
+
+# ═══════════════════════════════════════════════
+#  VENDOR REPAYMENTS (aggregated view)
+# ═══════════════════════════════════════════════
+
+@router.get("/vendor-repayments/{vendor_id}")
+def get_vendor_repayments(vendor_id: int, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+    """Get all repayment schedules for a vendor's funded/settled listings."""
+    # Get all listings for this vendor that have repayment schedules
+    listings = db.query(MarketplaceListing).filter(
+        MarketplaceListing.vendor_id == vendor_id,
+        MarketplaceListing.listing_status.in_(["funded", "settled"]),
+    ).all()
+
+    result = []
+    for listing in listings:
+        schedules = db.query(RepaymentSchedule).filter(
+            RepaymentSchedule.listing_id == listing.id
+        ).order_by(RepaymentSchedule.installment_number).all()
+
+        if not schedules:
+            continue
+
+        invoice = db.query(Invoice).filter(Invoice.id == listing.invoice_id).first()
+
+        total_due = sum(s.total_amount for s in schedules)
+        total_paid = sum(s.paid_amount or 0 for s in schedules if s.status == "paid")
+        remaining = total_due - total_paid
+
+        result.append({
+            "listing_id": listing.id,
+            "invoice_number": invoice.invoice_number if invoice else "N/A",
+            "buyer_name": invoice.buyer_name if invoice else "N/A",
+            "listing_status": listing.listing_status,
+            "funded_amount": listing.funded_amount,
+            "interest_rate": listing.max_interest_rate,
+            "total_due": total_due,
+            "total_paid": total_paid,
+            "remaining": remaining,
+            "installments": [{
+                "id": s.id,
+                "installment_number": s.installment_number,
+                "due_date": s.due_date,
+                "principal_amount": s.principal_amount,
+                "interest_amount": s.interest_amount,
+                "total_amount": s.total_amount,
+                "status": s.status,
+                "paid_date": s.paid_date,
+                "paid_amount": s.paid_amount,
+            } for s in schedules],
+        })
+
+    return result
 
 
 # ═══════════════════════════════════════════════
@@ -978,6 +1237,13 @@ def get_repayment_schedule(listing_id: int, db: Session = Depends(get_db), curre
 @router.post("/listings/{listing_id}/repayment/{installment_id}/pay")
 def pay_installment(listing_id: int, installment_id: int, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
     """Record payment of a repayment installment."""
+    # Only the vendor who owns the listing or admin can pay
+    listing_owner = db.query(MarketplaceListing).filter(MarketplaceListing.id == listing_id).first()
+    if listing_owner and current_user.role == "vendor" and listing_owner.vendor_id != current_user.vendor_id:
+        raise HTTPException(status_code=403, detail="Not authorized to pay this installment")
+    if current_user.role not in ("vendor", "admin"):
+        raise HTTPException(status_code=403, detail="Only vendors or admins can pay installments")
+
     sched = db.query(RepaymentSchedule).filter(
         RepaymentSchedule.id == installment_id,
         RepaymentSchedule.listing_id == listing_id,

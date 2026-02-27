@@ -6,9 +6,9 @@ import { useParams } from "next/navigation";
 import Link from "next/link";
 import { toast } from "sonner";
 import {
-  FileText, Loader2, IndianRupee, TrendingUp, ShieldCheck, AlertCircle,
+  FileText, Loader2, IndianRupee, TrendingUp, AlertCircle,
   CheckCircle, Clock, Store, BarChart3, Receipt, Activity, Bell,
-  Plus, ArrowUpRight, Gauge, BadgeCheck, AlertTriangle, Eye,
+  Plus, Eye, Gauge, BadgeCheck, AlertTriangle, ShieldCheck,
   Briefcase, CreditCard, ArrowRight, Sparkles, Shield, RefreshCw,
 } from "lucide-react";
 import {
@@ -133,7 +133,7 @@ export default function VendorDashboard() {
             {[
               { label: "Dashboard", href: `/vendor/${vendorId}/dashboard`, active: true },
               { label: "Invoices", href: `/vendor/${vendorId}/invoices` },
-              { label: "Verification", href: `/vendor/${vendorId}/verify` },
+              { label: "Repayments", href: `/vendor/${vendorId}/repayments` },
               { label: "Marketplace", href: "/marketplace" },
               { label: "Profile", href: `/vendor/${vendorId}` },
             ].map((nav) => (
@@ -163,7 +163,7 @@ export default function VendorDashboard() {
 
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 space-y-6">
         {/* ─── Hero Welcome ─── */}
-        <div className="relative bg-gradient-to-br from-indigo-600 via-violet-600 to-purple-700 rounded-3xl p-8 text-white overflow-hidden">
+        <div className="relative bg-gradient-to-br from-indigo-600 via-violet-600 to-purple-700 rounded-2xl p-6 text-white overflow-hidden">
           {/* Pattern overlay */}
           <div className="absolute inset-0 opacity-10" style={{ backgroundImage: "url(\"data:image/svg+xml,%3Csvg width='60' height='60' viewBox='0 0 60 60' xmlns='http://www.w3.org/2000/svg'%3E%3Cg fill='none' fill-rule='evenodd'%3E%3Cg fill='%23ffffff' fill-opacity='0.4'%3E%3Cpath d='M36 34v-4h-2v4h-4v2h4v4h2v-4h4v-2h-4zm0-30V0h-2v4h-4v2h4v4h2V6h4V4h-4zM6 34v-4H4v4H0v2h4v4h2v-4h4v-2H6zM6 4V0H4v4H0v2h4v4h2V6h4V4H6z'/%3E%3C/g%3E%3C/g%3E%3C/svg%3E\")" }} />
           <div className="relative z-10">
@@ -188,15 +188,15 @@ export default function VendorDashboard() {
                   className="inline-flex items-center gap-2 px-5 py-2.5 bg-white text-indigo-700 rounded-xl text-xs font-semibold hover:bg-indigo-50 transition-all active:scale-[0.98] shadow-lg">
                   <Plus className="w-4 h-4" /> Create Invoice
                 </Link>
-                <Link href={`/vendor/${vendorId}/verify`}
+                <Link href={`/vendor/${vendorId}/repayments`}
                   className="inline-flex items-center gap-2 px-5 py-2.5 bg-white/15 backdrop-blur-sm text-white border border-white/20 rounded-xl text-xs font-semibold hover:bg-white/25 transition-all active:scale-[0.98]">
-                  <ShieldCheck className="w-4 h-4" /> Verify Profile
+                  <CreditCard className="w-4 h-4" /> Repayments
                 </Link>
               </div>
             </div>
 
             {/* Hero stats row */}
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mt-6">
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 mt-4">
               <div className="bg-white/10 backdrop-blur-sm border border-white/10 rounded-2xl p-4">
                 <p className="text-indigo-200 text-[11px] uppercase tracking-wider font-medium mb-1">CIBIL Score</p>
                 <p className="text-2xl font-bold">{data.vendor.cibil_score ?? "—"}</p>
@@ -278,7 +278,7 @@ export default function VendorDashboard() {
               </h2>
               <span className="text-[10px] text-gray-400 uppercase tracking-wider">Last 6 months</span>
             </div>
-            <ResponsiveContainer width="100%" height={260}>
+            <ResponsiveContainer width="100%" height={220}>
               <BarChart data={data.monthly_trend} barGap={4}>
                 <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" vertical={false} />
                 <XAxis dataKey="month" tick={{ fontSize: 11, fill: "#94a3b8" }} axisLine={false} tickLine={false} />
@@ -300,7 +300,7 @@ export default function VendorDashboard() {
               <TrendingUp className="w-4 h-4 text-violet-500" /> Invoice Status
             </h2>
             {statusPieData.length > 0 ? (
-              <ResponsiveContainer width="100%" height={260}>
+              <ResponsiveContainer width="100%" height={220}>
                 <PieChart>
                   <Pie data={statusPieData} cx="50%" cy="45%" innerRadius={55} outerRadius={85}
                     paddingAngle={4} dataKey="value" stroke="none"
@@ -314,7 +314,7 @@ export default function VendorDashboard() {
                 </PieChart>
               </ResponsiveContainer>
             ) : (
-              <div className="flex flex-col items-center justify-center h-[260px] text-gray-400">
+              <div className="flex flex-col items-center justify-center h-[220px] text-gray-400">
                 <Receipt className="w-10 h-10 text-gray-200 mb-2" />
                 <p className="text-sm">No invoices yet</p>
                 <Link href={`/vendor/${vendorId}/invoices/create`}
@@ -380,8 +380,7 @@ export default function VendorDashboard() {
               <h2 className="text-sm font-bold text-gray-900 flex items-center gap-2">
                 <Shield className="w-4 h-4 text-emerald-500" /> Verification Status
               </h2>
-              <Link href={`/vendor/${vendorId}/verify`}
-                className="text-[11px] text-indigo-600 hover:underline font-medium">Run checks →</Link>
+              <span className="text-[11px] text-gray-400 font-medium">Auto-verified</span>
             </div>
             <div className="flex items-center gap-6">
               <div className="relative w-28 h-28 flex-shrink-0">
@@ -450,8 +449,8 @@ export default function VendorDashboard() {
                 ))}
               </div>
             ) : (
-              <div className="text-center py-12">
-                <Activity className="w-10 h-10 text-gray-200 mx-auto mb-2" />
+              <div className="text-center py-6">
+                <Activity className="w-8 h-8 text-gray-200 mx-auto mb-2" />
                 <p className="text-sm text-gray-400">No recent activity</p>
                 <p className="text-[11px] text-gray-300 mt-1">Activity will appear here as you use InvoX</p>
               </div>
@@ -486,8 +485,8 @@ export default function VendorDashboard() {
                 ))}
               </div>
             ) : (
-              <div className="text-center py-12">
-                <Bell className="w-10 h-10 text-gray-200 mx-auto mb-2" />
+              <div className="text-center py-6">
+                <Bell className="w-8 h-8 text-gray-200 mx-auto mb-2" />
                 <p className="text-sm text-gray-400">No notifications</p>
               </div>
             )}
@@ -499,9 +498,9 @@ export default function VendorDashboard() {
           {[
             { icon: Plus, label: "Create Invoice", desc: "Generate a new GST invoice", href: `/vendor/${vendorId}/invoices/create`, gradient: "from-indigo-500 to-violet-600" },
             { icon: Eye, label: "View Invoices", desc: "Manage your invoices", href: `/vendor/${vendorId}/invoices`, gradient: "from-blue-500 to-cyan-600" },
-            { icon: ShieldCheck, label: "Run Verification", desc: "Check compliance status", href: `/vendor/${vendorId}/verify`, gradient: "from-emerald-500 to-teal-600" },
-            { icon: Shield, label: "KYC Verification", desc: "Complete identity check", href: "/kyc", gradient: "from-amber-500 to-orange-600" },
+            { icon: CreditCard, label: "Repayments", desc: "Pay your installments", href: `/vendor/${vendorId}/repayments`, gradient: "from-emerald-500 to-teal-600" },
             { icon: Briefcase, label: "Marketplace", desc: "Browse & manage listings", href: "/marketplace", gradient: "from-purple-500 to-pink-600" },
+            { icon: Activity, label: "AI Negotiations", desc: "View lender negotiations", href: `/vendor/${vendorId}/negotiations`, gradient: "from-violet-500 to-purple-700" },
           ].map((action) => (
             <Link key={action.label} href={action.href}
               className="group bg-white rounded-2xl border border-gray-100 p-5 hover:shadow-lg hover:shadow-gray-100/50 transition-all hover:-translate-y-0.5">

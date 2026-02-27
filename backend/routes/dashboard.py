@@ -10,7 +10,8 @@ import json
 from database import get_db
 from models import (
     Vendor, Invoice, InvoiceItem, MarketplaceListing, Lender,
-    BlockchainBlock, VerificationCheck, RepaymentSchedule, ActivityLog, User
+    BlockchainBlock, VerificationCheck, RepaymentSchedule, ActivityLog, User,
+    FractionalInvestment,
 )
 from routes.auth import get_current_user
 
@@ -47,9 +48,10 @@ def vendor_dashboard(vendor_id: int, db: Session = Depends(get_db), current_user
     total_listings = len(listings)
     funded_listings = [l for l in listings if l.listing_status == "funded"]
     settled_listings = [l for l in listings if l.listing_status == "settled"]
-    total_funded = sum(l.funded_amount or 0 for l in funded_listings + settled_listings)
-    total_settled = sum(l.funded_amount or 0 for l in settled_listings)
-    open_listings = sum(1 for l in listings if l.listing_status == "open")
+    partially_funded_listings = [l for l in listings if l.listing_status == "partially_funded"]
+    total_funded = sum(l.total_funded_amount or l.funded_amount or 0 for l in funded_listings + settled_listings + partially_funded_listings)
+    total_settled = sum(l.total_funded_amount or l.funded_amount or 0 for l in settled_listings)
+    open_listings = sum(1 for l in listings if l.listing_status in ("open", "partially_funded"))
 
     # ── Repayment stats ──
     listing_ids = [l.id for l in listings]
@@ -162,15 +164,36 @@ def lender_dashboard(lender_id: int, db: Session = Depends(get_db), current_user
     if not lender:
         raise HTTPException(status_code=404, detail="Lender not found")
 
-    # ── Funded listings ──
-    funded = db.query(MarketplaceListing).filter(
+    # ── Funded listings (legacy + fractional) ──
+    # Get listings where this lender has fractional investments
+    frac_listing_ids = db.query(FractionalInvestment.listing_id).filter(
+        FractionalInvestment.lender_id == lender_id,
+        FractionalInvestment.status == "active",
+    ).distinct().all()
+    frac_listing_ids = [r[0] for r in frac_listing_ids]
+
+    # Also include legacy single-lender funded listings
+    legacy_funded = db.query(MarketplaceListing).filter(
         MarketplaceListing.lender_id == lender_id,
         MarketplaceListing.listing_status.in_(["funded", "settled"]),
     ).all()
+    legacy_ids = [l.id for l in legacy_funded]
+
+    # Merge both sets
+    all_listing_ids = list(set(frac_listing_ids + legacy_ids))
+    funded = db.query(MarketplaceListing).filter(
+        MarketplaceListing.id.in_(all_listing_ids),
+    ).all() if all_listing_ids else []
+
+    # Calculate totals using fractional investments for accuracy
+    frac_investments = db.query(FractionalInvestment).filter(
+        FractionalInvestment.lender_id == lender_id,
+        FractionalInvestment.status == "active",
+    ).all()
 
     total_investments = len(funded)
-    total_funded_amount = sum(l.funded_amount or 0 for l in funded)
-    active_investments = sum(1 for l in funded if l.listing_status == "funded")
+    total_funded_amount = sum(f.invested_amount for f in frac_investments) if frac_investments else sum(l.funded_amount or 0 for l in funded)
+    active_investments = sum(1 for l in funded if l.listing_status in ("funded", "partially_funded"))
     settled_investments = sum(1 for l in funded if l.listing_status == "settled")
 
     # ── Returns calculation ──
@@ -200,12 +223,12 @@ def lender_dashboard(lender_id: int, db: Session = Depends(get_db), current_user
             btype = vendor.business_type or "Other"
             biz_type_dist[btype] = biz_type_dist.get(btype, 0) + 1
 
-    # ── Available listings (not yet funded) ──
+    # ── Available listings (not yet fully funded) ──
     available = db.query(MarketplaceListing).filter(
-        MarketplaceListing.listing_status == "open"
+        MarketplaceListing.listing_status.in_(["open", "partially_funded"])
     ).count()
     available_value = db.query(sa_func.coalesce(sa_func.sum(MarketplaceListing.requested_amount), 0)).filter(
-        MarketplaceListing.listing_status == "open"
+        MarketplaceListing.listing_status.in_(["open", "partially_funded"])
     ).scalar()
 
     # ── Repayment tracking ──

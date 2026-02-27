@@ -273,6 +273,13 @@ export interface MarketplaceBrowseItem {
   created_at: string | null;
   funded_amount: number | null;
   total_funded_deals: number;
+
+  // Community Pot / Fractional Funding
+  total_funded_amount: number;
+  total_investors: number;
+  min_investment: number;
+  funding_progress_pct: number;
+  remaining_amount: number;
 }
 
 /** Full detail when lender clicks a listing */
@@ -324,7 +331,31 @@ export interface MarketplaceDetailItem {
   funded_amount: number | null;
   funded_by: string | null;
   funded_at: string | null;
+
+  // Community Pot / Fractional Funding
+  total_funded_amount: number;
+  total_investors: number;
+  min_investment: number;
+  funding_progress_pct: number;
+  remaining_amount: number;
+  investors: FractionalInvestor[] | null;
+
   created_at: string | null;
+}
+
+/** Fractional investor in Community Pot */
+export interface FractionalInvestor {
+  id: number;
+  lender_id: number;
+  lender_name: string;
+  lender_type: string;
+  organization: string | null;
+  invested_amount: number;
+  offered_interest_rate: number;
+  ownership_percentage: number;
+  expected_return: number | null;
+  invested_at: string | null;
+  blockchain_hash: string | null;
 }
 
 /** Lender entity */
@@ -371,6 +402,63 @@ export const UNITS = [
   "NOS", "KGS", "LTR", "MTR", "SQM", "SQF",
   "PCS", "BOX", "SET", "BAG", "TON", "QTL", "DOZ", "PAR", "UNT",
 ];
+
+// ═══════ AI Negotiator Chat Types ═══════
+
+export interface NegotiationChatMessage {
+  id: number;
+  sender: "lender" | "ai_agent" | "system";
+  message: string;
+  message_type: "offer" | "counter" | "accept" | "reject" | "info" | "welcome";
+  offered_rate: number | null;
+  offered_amount: number | null;
+  funding_percentage: number | null;
+  offer_score: number | null;
+  created_at: string | null;
+}
+
+export interface NegotiationChat {
+  session_id: number;
+  listing_id: number;
+  status: "active" | "accepted" | "rejected" | "expired";
+  current_round: number;
+  max_rounds: number;
+
+  lender: {
+    id: number;
+    name: string;
+    type: string;
+    organization: string | null;
+  };
+  vendor: {
+    id: number;
+    business_name: string;
+  };
+
+  invoice_amount: number;
+  remaining_amount: number;
+  total_funded: number;
+  total_investors: number;
+  min_investment: number;
+  vendor_credit_score: number;
+  vendor_risk_grade: string;
+  fair_market_rate: number;
+  max_interest_rate: number;
+  tenure_days: number;
+
+  final_rate: number | null;
+  final_amount: number | null;
+  final_score: number | null;
+
+  messages: NegotiationChatMessage[];
+
+  // Extra fields for vendor/lender listing views
+  invoice_number?: string;
+  listing_status?: string;
+
+  completed_at: string | null;
+  created_at: string | null;
+}
 
 // ═══════ Auth Types ═══════
 

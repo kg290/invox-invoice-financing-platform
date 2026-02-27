@@ -24,6 +24,8 @@ from routes.triple_verification import router as triple_verification_router
 from routes.credit_scoring import router as credit_scoring_router
 from routes.factoring import router as factoring_router
 from routes.emandate import router as emandate_router
+from routes.ai_negotiator import router as ai_negotiator_router
+from routes.admin import router as admin_router
 
 # Create tables
 Base.metadata.create_all(bind=engine)
@@ -67,6 +69,8 @@ app.include_router(triple_verification_router)
 app.include_router(credit_scoring_router)
 app.include_router(factoring_router)
 app.include_router(emandate_router)
+app.include_router(ai_negotiator_router)
+app.include_router(admin_router)
 
 # Serve uploaded files (business photos, documents)
 _upload_dir = "/tmp/uploads" if os.environ.get("VERCEL") else "uploads"

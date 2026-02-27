@@ -63,6 +63,7 @@ function OTPContent() {
         if (user.vendor_id) {
           router.push(`/vendor/${user.vendor_id}/dashboard`);
         } else {
+          // Vendor auto-setup failed or no data — go to manual register
           router.push("/vendor/register");
         }
       } else if (user.role === "lender") {
@@ -71,6 +72,8 @@ function OTPContent() {
         } else {
           router.push("/marketplace");
         }
+      } else if (user.role === "admin") {
+        router.push("/admin/dashboard");
       } else {
         router.push("/");
       }
@@ -85,8 +88,7 @@ function OTPContent() {
   const resendOtp = async () => {
     setResending(true);
     try {
-      // Need password — for demo, use a dummy resend that generates new OTP
-      const r = await api.post("/auth/login", { email, password: "resend-dummy", otp_channel: "email" });
+      const r = await api.post("/auth/resend-otp-email", { email });
       toast.success("OTP resent!");
       if (r.data.debug_otp) {
         toast.info(`Demo OTP: ${r.data.debug_otp}`, { duration: 15000 });

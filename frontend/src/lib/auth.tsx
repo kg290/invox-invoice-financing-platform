@@ -34,10 +34,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const storedToken = localStorage.getItem("invox_access_token");
     const storedUser = localStorage.getItem("invox_user");
     if (storedToken && storedUser) {
-      setToken(storedToken);
-      setUser(JSON.parse(storedUser));
-      // Set axios default header
-      api.defaults.headers.common["Authorization"] = `Bearer ${storedToken}`;
+      try {
+        setToken(storedToken);
+        setUser(JSON.parse(storedUser));
+        api.defaults.headers.common["Authorization"] = `Bearer ${storedToken}`;
+      } catch {
+        localStorage.removeItem("invox_access_token");
+        localStorage.removeItem("invox_user");
+      }
     }
     setIsLoading(false);
   }, []);

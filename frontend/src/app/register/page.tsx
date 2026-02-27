@@ -6,7 +6,7 @@ import Link from "next/link";
 import { toast } from "sonner";
 import {
   FileText, Mail, Lock, Loader2, Eye, EyeOff, User, Phone,
-  Smartphone, MessageCircle, Building2, Briefcase,
+  Smartphone, MessageCircle, Building2, Briefcase, CreditCard, Fingerprint, Hash,
 } from "lucide-react";
 import api, { getErrorMessage } from "@/lib/api";
 
@@ -16,6 +16,7 @@ export default function RegisterPage() {
     name: "", email: "", phone: "", password: "", confirmPassword: "",
     role: "vendor", otp_channel: "email",
     organization: "", lender_type: "individual",
+    pan_number: "", aadhaar_number: "", gstin: "",
   });
   const [loading, setLoading] = useState(false);
   const [showPw, setShowPw] = useState(false);
@@ -31,6 +32,11 @@ export default function RegisterPage() {
     if (form.password.length < 6) {
       toast.error("Password must be at least 6 characters"); return;
     }
+    if (form.role === "vendor") {
+      if (!form.pan_number || !form.aadhaar_number || !form.gstin) {
+        toast.error("PAN, Aadhaar and GSTIN are required for vendor registration"); return;
+      }
+    }
     setLoading(true);
     try {
       const payload: Record<string, string> = {
@@ -40,6 +46,11 @@ export default function RegisterPage() {
       if (form.role === "lender") {
         payload.organization = form.organization;
         payload.lender_type = form.lender_type;
+      }
+      if (form.role === "vendor") {
+        payload.pan_number = form.pan_number;
+        payload.aadhaar_number = form.aadhaar_number;
+        payload.gstin = form.gstin;
       }
       const r = await api.post("/auth/register", payload);
       toast.success(`Account created! OTP sent via ${form.otp_channel}`);
@@ -163,6 +174,44 @@ export default function RegisterPage() {
                     <option value="nbfc">NBFC</option>
                     <option value="bank">Bank</option>
                   </select>
+                </div>
+              </div>
+            )}
+
+            {/* Vendor auto-KYC fields */}
+            {form.role === "vendor" && (
+              <div className="space-y-3 p-4 bg-blue-50 rounded-xl">
+                <div className="flex items-center gap-2 mb-1">
+                  <Fingerprint className="w-4 h-4 text-blue-600" />
+                  <span className="text-xs font-semibold text-blue-700">Identity & Business Verification</span>
+                  <span className="text-[10px] bg-blue-100 text-blue-600 px-2 py-0.5 rounded-full font-medium">Auto-verified</span>
+                </div>
+                <p className="text-[11px] text-blue-500 -mt-1 mb-2">Your profile will be auto-filled from government records after OTP verification</p>
+                <div className="grid sm:grid-cols-3 gap-3">
+                  <div>
+                    <label className="block text-xs font-medium text-gray-600 mb-1">PAN Number *</label>
+                    <div className="relative">
+                      <CreditCard className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
+                      <input value={form.pan_number} onChange={(e) => setForm({ ...form, pan_number: e.target.value.toUpperCase() })}
+                        className={`${inputCls} pl-10`} placeholder="ABCDE1234F" maxLength={10} />
+                    </div>
+                  </div>
+                  <div>
+                    <label className="block text-xs font-medium text-gray-600 mb-1">Aadhaar Number *</label>
+                    <div className="relative">
+                      <Fingerprint className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
+                      <input value={form.aadhaar_number} onChange={(e) => setForm({ ...form, aadhaar_number: e.target.value.replace(/\D/g, '').slice(0, 12) })}
+                        className={`${inputCls} pl-10`} placeholder="123412341234" maxLength={12} />
+                    </div>
+                  </div>
+                  <div>
+                    <label className="block text-xs font-medium text-gray-600 mb-1">GSTIN *</label>
+                    <div className="relative">
+                      <Hash className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
+                      <input value={form.gstin} onChange={(e) => setForm({ ...form, gstin: e.target.value.toUpperCase() })}
+                        className={`${inputCls} pl-10`} placeholder="22ABCDE1234F1Z5" maxLength={15} />
+                    </div>
+                  </div>
                 </div>
               </div>
             )}

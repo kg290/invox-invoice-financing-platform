@@ -17,7 +17,8 @@ import { MarketplaceBrowseItem, LenderResponse } from "@/lib/types";
 /* ── helpers ── */
 const statusConfig: Record<string, { bg: string; text: string; dot: string; label: string }> = {
   open: { bg: "bg-emerald-50", text: "text-emerald-700", dot: "bg-emerald-500", label: "Open for Funding" },
-  funded: { bg: "bg-blue-50", text: "text-blue-700", dot: "bg-blue-500", label: "Funded" },
+  partially_funded: { bg: "bg-amber-50", text: "text-amber-700", dot: "bg-amber-500", label: "Funding In Progress" },
+  funded: { bg: "bg-blue-50", text: "text-blue-700", dot: "bg-blue-500", label: "Fully Funded" },
   settled: { bg: "bg-gray-100", text: "text-gray-600", dot: "bg-gray-400", label: "Settled" },
   defaulted: { bg: "bg-red-50", text: "text-red-700", dot: "bg-red-500", label: "Defaulted" },
 };
@@ -155,7 +156,7 @@ export default function MarketplacePage() {
     }
   };
 
-  const openCount = listings.filter((l) => l.listing_status === "open").length;
+  const openCount = listings.filter((l) => l.listing_status === "open" || l.listing_status === "partially_funded").length;
   const totalValue = listings.reduce((s, l) => s + l.requested_amount, 0);
   const avgInterest = listings.length > 0 ? (listings.reduce((s, l) => s + l.max_interest_rate, 0) / listings.length).toFixed(1) : "0";
 
@@ -192,7 +193,7 @@ export default function MarketplacePage() {
       <div className="relative overflow-hidden">
         <div className="absolute inset-0 bg-gradient-to-br from-indigo-600 via-violet-600 to-purple-700" />
         <div className="absolute inset-0 opacity-10" style={{ backgroundImage: "url(\"data:image/svg+xml,%3Csvg width='60' height='60' viewBox='0 0 60 60' xmlns='http://www.w3.org/2000/svg'%3E%3Cg fill='none' fill-rule='evenodd'%3E%3Cg fill='%23ffffff' fill-opacity='0.4'%3E%3Cpath d='M36 34v-4h-2v4h-4v2h4v4h2v-4h4v-2h-4zm0-30V0h-2v4h-4v2h4v4h2V6h4V4h-4zM6 34v-4H4v4H0v2h4v4h2v-4h4v-2H6zM6 4V0H4v4H0v2h4v4h2V6h4V4H6z'/%3E%3C/g%3E%3C/g%3E%3C/svg%3E\")" }} />
-        <div className="relative max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-12 pb-16">
+        <div className="relative max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 pb-12">
           <div className="flex items-start justify-between">
             <div>
               <div className="inline-flex items-center gap-2 px-3 py-1.5 bg-white/15 backdrop-blur-sm rounded-full text-white/90 text-xs font-medium mb-4">
@@ -253,6 +254,7 @@ export default function MarketplacePage() {
               {[
                 { key: "", label: "All", count: listings.length },
                 { key: "open", label: "Open", count: listings.filter(l => l.listing_status === "open").length },
+                { key: "partially_funded", label: "In Progress", count: listings.filter(l => l.listing_status === "partially_funded").length },
                 { key: "funded", label: "Funded", count: listings.filter(l => l.listing_status === "funded").length },
                 { key: "settled", label: "Settled", count: listings.filter(l => l.listing_status === "settled").length },
               ].map((f) => (
@@ -377,7 +379,7 @@ export default function MarketplacePage() {
 
         {/* ─── Listings Grid ─── */}
         {loading ? (
-          <div className="flex flex-col items-center justify-center py-24">
+          <div className="flex flex-col items-center justify-center py-16">
             <div className="relative">
               <div className="w-16 h-16 border-4 border-indigo-100 rounded-full" />
               <div className="w-16 h-16 border-4 border-indigo-600 border-t-transparent rounded-full animate-spin absolute inset-0" />
@@ -385,7 +387,7 @@ export default function MarketplacePage() {
             <p className="text-sm text-gray-500 mt-4">Loading marketplace...</p>
           </div>
         ) : filtered.length === 0 ? (
-          <div className="text-center py-24 bg-white rounded-2xl border border-gray-100">
+          <div className="text-center py-16 bg-white rounded-2xl border border-gray-100">
             <div className="w-16 h-16 bg-gray-50 rounded-2xl flex items-center justify-center mx-auto mb-4">
               <Store className="w-8 h-8 text-gray-300" />
             </div>
@@ -576,6 +578,42 @@ export default function MarketplacePage() {
                       </div>
                     </div>
 
+                    {/* ── Community Pot Progress Bar ── */}
+                    {(l.listing_status === "open" || l.listing_status === "partially_funded" || l.listing_status === "funded") && (
+                      <div className="mb-4 bg-gradient-to-r from-indigo-50 to-purple-50 rounded-xl p-3 border border-indigo-100">
+                        <div className="flex items-center justify-between mb-1.5">
+                          <span className="text-[11px] font-semibold text-indigo-700 flex items-center gap-1">
+                            <Users className="w-3 h-3" /> Community Pot
+                          </span>
+                          <span className="text-[11px] font-bold text-indigo-700">
+                            {l.funding_progress_pct.toFixed(0)}% Funded
+                            {l.total_investors > 0 && <span className="font-normal text-indigo-400 ml-1">by {l.total_investors} investor{l.total_investors > 1 ? "s" : ""}</span>}
+                          </span>
+                        </div>
+                        <div className="w-full h-2.5 bg-white rounded-full overflow-hidden shadow-inner">
+                          <div
+                            className={`h-full rounded-full transition-all duration-1000 ease-out ${
+                              l.funding_progress_pct >= 100
+                                ? "bg-gradient-to-r from-emerald-400 to-green-500"
+                                : l.funding_progress_pct >= 50
+                                ? "bg-gradient-to-r from-indigo-400 to-purple-500"
+                                : "bg-gradient-to-r from-blue-400 to-indigo-500"
+                            }`}
+                            style={{ width: `${Math.min(100, l.funding_progress_pct)}%` }}
+                          />
+                        </div>
+                        <div className="flex justify-between mt-1.5">
+                          <span className="text-[10px] text-indigo-500">₹{(l.total_funded_amount || 0).toLocaleString("en-IN")} raised</span>
+                          <span className="text-[10px] text-indigo-500">
+                            {l.remaining_amount > 0 ? `₹${l.remaining_amount.toLocaleString("en-IN")} left` : "Fully Funded ✓"}
+                          </span>
+                        </div>
+                        {l.listing_status !== "funded" && l.min_investment > 0 && (
+                          <p className="text-[9px] text-indigo-400 mt-1 text-center">Min. investment: ₹{l.min_investment.toLocaleString("en-IN")}</p>
+                        )}
+                      </div>
+                    )}
+
                     {/* Bottom Row: Reviews + Deals + CTA */}
                     <div className="mt-auto pt-3 border-t border-gray-100 flex items-center justify-between">
                       <div className="flex items-center gap-3">
@@ -663,7 +701,7 @@ export default function MarketplacePage() {
       )}
 
       {/* Footer spacing */}
-      <div className="h-12" />
+      <div className="h-6" />
     </div>
     </ProtectedRoute>
   );

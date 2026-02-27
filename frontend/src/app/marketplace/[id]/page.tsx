@@ -11,10 +11,11 @@ import {
   FileBarChart2, HandCoins, CheckCircle, Star, Briefcase, Globe,
   Activity, CreditCard, MapPin, Users, BadgeCheck, Shield, ChevronLeft,
   ChevronRight, ArrowUpRight, AlertTriangle, CircleDollarSign, Gauge,
-  Eye, Lock, Sparkles, BarChart3, X, ExternalLink, Info,
+  Eye, Lock, BarChart3, X, ExternalLink, Info, Bot, Zap,
+  MessageSquare,
 } from "lucide-react";
 import api, { getErrorMessage, fileUrl } from "@/lib/api";
-import { MarketplaceDetailItem, LenderResponse, RepaymentInstallment, ActivityItem } from "@/lib/types";
+import { MarketplaceDetailItem, LenderResponse, RepaymentInstallment, ActivityItem, NegotiationChat, NegotiationChatMessage } from "@/lib/types";
 import { createFundingOrder, createRepaymentOrder, createPayAllOrder, requestRefund } from "@/lib/razorpay";
 import InvoXPayCheckout, { OrderData } from "@/components/InvoXPayCheckout";
 import { useAuth } from "@/lib/auth";
@@ -22,7 +23,8 @@ import { useAuth } from "@/lib/auth";
 /* ── helpers ── */
 const statusConfig: Record<string, { bg: string; text: string; dot: string; label: string; border: string }> = {
   open: { bg: "bg-emerald-50", text: "text-emerald-700", dot: "bg-emerald-500", label: "Open for Funding", border: "border-emerald-200" },
-  funded: { bg: "bg-blue-50", text: "text-blue-700", dot: "bg-blue-500", label: "Funded", border: "border-blue-200" },
+  partially_funded: { bg: "bg-amber-50", text: "text-amber-700", dot: "bg-amber-500", label: "Funding In Progress", border: "border-amber-200" },
+  funded: { bg: "bg-blue-50", text: "text-blue-700", dot: "bg-blue-500", label: "Fully Funded", border: "border-blue-200" },
   settled: { bg: "bg-gray-100", text: "text-gray-600", dot: "bg-gray-400", label: "Settled", border: "border-gray-200" },
   defaulted: { bg: "bg-red-50", text: "text-red-700", dot: "bg-red-500", label: "Defaulted", border: "border-red-200" },
 };
@@ -93,6 +95,14 @@ export default function MarketplaceDetailPage() {
   // Pay all
   const [payingAll, setPayingAll] = useState(false);
 
+  // AI Negotiator Chat
+  const [chatSession, setChatSession] = useState<NegotiationChat | null>(null);
+  const [showChat, setShowChat] = useState(false);
+  const [chatLoading, setChatLoading] = useState(false);
+  const [offerForm, setOfferForm] = useState({ rate: 0, amount: 0, message: "" });
+  const [sendingOffer, setSendingOffer] = useState(false);
+  const [listingNegotiations, setListingNegotiations] = useState<NegotiationChat[]>([]);
+
   const fetchRepayments = () => {
     api.get(`/marketplace/listings/${listingId}/repayment`).then((r) => setRepayments(r.data.installments || [])).catch(() => {});
   };
@@ -113,8 +123,69 @@ export default function MarketplaceDetailPage() {
         fetchRepayments();
       }
       fetchActivity();
+      // Check for existing negotiations on this listing
+      api.get(`/negotiate/listing/${listingId}`).then((r) => setListingNegotiations(r.data || [])).catch(() => {});
     }).catch(() => setLoading(false));
   }, [listingId]);
+
+  const openNegotiationChat = async () => {
+    setChatLoading(true);
+    try {
+      const r = await api.post(`/negotiate/${listingId}/start`);
+      setChatSession(r.data);
+      setShowChat(true);
+      // Pre-fill offer form: use remaining amount (Community Pot), not full invoice
+      setOfferForm({ rate: r.data.max_interest_rate || 15, amount: r.data.remaining_amount || r.data.invoice_amount || 0, message: "" });
+      toast.success("Negotiation chat started! Send your first offer.");
+    } catch (err: unknown) {
+      toast.error(getErrorMessage(err, "Failed to start negotiation"));
+    }
+    setChatLoading(false);
+  };
+
+  const sendOffer = async () => {
+    if (!chatSession) return;
+    setSendingOffer(true);
+    try {
+      const r = await api.post(`/negotiate/${chatSession.session_id}/offer`, {
+        rate: offerForm.rate,
+        amount: offerForm.amount,
+        message: offerForm.message || "",
+      });
+      setChatSession(r.data);
+      setOfferForm((f) => ({ ...f, message: "" }));
+      if (r.data.status === "accepted") {
+        toast.success(`Deal accepted at ${r.data.final_rate}%!`);
+      } else if (r.data.status === "rejected") {
+        toast.error("Negotiation ended — no agreement reached.");
+      }
+      // Refresh listing negotiations
+      api.get(`/negotiate/listing/${listingId}`).then((res) => setListingNegotiations(res.data || [])).catch(() => {});
+    } catch (err: unknown) {
+      toast.error(getErrorMessage(err, "Failed to send offer"));
+    }
+    setSendingOffer(false);
+  };
+
+  const resumeChat = (session: NegotiationChat) => {
+    setChatSession(session);
+    setOfferForm({ rate: session.max_interest_rate || 15, amount: session.remaining_amount || session.invoice_amount || 0, message: "" });
+    setShowChat(true);
+  };
+
+  const acceptAndFund = () => {
+    if (!chatSession || chatSession.status !== "accepted") return;
+    // Use negotiated slice amount — Community Pot compatible
+    const matchedLender = lenders.find((l) => l.id === chatSession.lender.id);
+    setFundForm({
+      lender_id: matchedLender?.id || (lenders[0]?.id ?? 0),
+      funded_amount: chatSession.final_amount || chatSession.remaining_amount || chatSession.invoice_amount,
+      offered_interest_rate: chatSession.final_rate || chatSession.max_interest_rate,
+    });
+    setShowChat(false);
+    setShowFund(true);
+    toast.success(`Deal accepted at ${chatSession.final_rate}%! Complete your investment.`);
+  };
 
   const requestPdf = async () => {
     setPdfLoading(true);
@@ -211,7 +282,7 @@ export default function MarketplaceDetailPage() {
   );
 
   const inputCls = "w-full px-3 py-2.5 border border-gray-200 rounded-xl text-sm text-gray-900 placeholder:text-gray-400 focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none transition-all bg-white";
-  const isOpen = detail.listing_status === "open";
+  const isOpen = detail.listing_status === "open" || detail.listing_status === "partially_funded";
   const st = statusConfig[detail.listing_status] || statusConfig.open;
   const risk = riskMeter(detail.risk_score);
   const cibil = cibilGrade(detail.cibil_score);
@@ -571,16 +642,25 @@ export default function MarketplaceDetailPage() {
                       </div>
                     </div>
 
-                    {detail.listing_status === "funded" && detail.funded_amount && (
-                      <div className="bg-emerald-50 border border-emerald-200 rounded-xl p-4">
-                        <div className="flex items-center gap-2 mb-2">
-                          <CheckCircle className="w-4 h-4 text-emerald-600" />
-                          <p className="text-sm font-semibold text-emerald-800">Funding Received</p>
+                    {(detail.listing_status === "funded" || detail.listing_status === "partially_funded") && (detail.total_funded_amount || 0) > 0 && (
+                      <div className={`${detail.listing_status === "funded" ? "bg-emerald-50 border-emerald-200" : "bg-amber-50 border-amber-200"} border rounded-xl p-4`}>
+                        <div className="flex items-center justify-between mb-2">
+                          <div className="flex items-center gap-2">
+                            <CheckCircle className={`w-4 h-4 ${detail.listing_status === "funded" ? "text-emerald-600" : "text-amber-600"}`} />
+                            <p className={`text-sm font-semibold ${detail.listing_status === "funded" ? "text-emerald-800" : "text-amber-800"}`}>
+                              {detail.listing_status === "funded" ? "Fully Funded" : "Funding In Progress"}
+                            </p>
+                          </div>
+                          <span className="text-xs font-bold text-gray-500">{detail.total_investors || 0} investor{(detail.total_investors || 0) !== 1 ? "s" : ""}</span>
+                        </div>
+                        <div className="w-full h-2 bg-white/60 rounded-full overflow-hidden mb-2">
+                          <div className={`h-full rounded-full ${detail.listing_status === "funded" ? "bg-emerald-500" : "bg-amber-500"}`}
+                            style={{ width: `${Math.min(100, detail.funding_progress_pct || 0)}%` }} />
                         </div>
                         <div className="grid sm:grid-cols-3 gap-3 text-xs">
-                          <div><span className="text-emerald-600">Amount:</span> <span className="font-bold">₹{detail.funded_amount.toLocaleString("en-IN")}</span></div>
-                          <div><span className="text-emerald-600">By:</span> <span className="font-bold">{detail.funded_by}</span></div>
-                          <div><span className="text-emerald-600">Date:</span> <span className="font-bold">{detail.funded_at ? new Date(detail.funded_at).toLocaleDateString("en-IN") : "—"}</span></div>
+                          <div><span className={detail.listing_status === "funded" ? "text-emerald-600" : "text-amber-600"}>Raised:</span> <span className="font-bold">₹{(detail.total_funded_amount || 0).toLocaleString("en-IN")}</span></div>
+                          <div><span className={detail.listing_status === "funded" ? "text-emerald-600" : "text-amber-600"}>Target:</span> <span className="font-bold">₹{detail.requested_amount.toLocaleString("en-IN")}</span></div>
+                          <div><span className={detail.listing_status === "funded" ? "text-emerald-600" : "text-amber-600"}>Progress:</span> <span className="font-bold">{(detail.funding_progress_pct || 0).toFixed(1)}%</span></div>
                         </div>
                       </div>
                     )}
@@ -806,20 +886,100 @@ export default function MarketplaceDetailPage() {
 
           {/* Right column (1/3) — Sidebar */}
           <div className="space-y-5">
+            {/* ── Community Pot Progress Card ── */}
+            <div className="bg-white rounded-2xl border border-gray-100 shadow-lg p-6">
+              <div className="flex items-center gap-2 mb-3">
+                <div className="w-8 h-8 bg-gradient-to-br from-indigo-500 to-purple-600 rounded-lg flex items-center justify-center">
+                  <Users className="w-4 h-4 text-white" />
+                </div>
+                <div>
+                  <h3 className="text-sm font-bold text-gray-900">Community Pot</h3>
+                  <p className="text-[10px] text-gray-400">Fractional Investment Pool</p>
+                </div>
+              </div>
+
+              {/* Progress bar */}
+              <div className="mb-3">
+                <div className="flex items-center justify-between mb-1">
+                  <span className="text-xl font-bold text-gray-900">{detail.funding_progress_pct?.toFixed(0) || 0}%</span>
+                  <span className="text-xs text-gray-500">
+                    {detail.total_investors || 0} Investor{(detail.total_investors || 0) !== 1 ? "s" : ""}
+                  </span>
+                </div>
+                <div className="w-full h-3 bg-gray-100 rounded-full overflow-hidden">
+                  <div
+                    className={`h-full rounded-full transition-all duration-1000 ease-out ${
+                      (detail.funding_progress_pct || 0) >= 100
+                        ? "bg-gradient-to-r from-emerald-400 to-green-500"
+                        : (detail.funding_progress_pct || 0) >= 50
+                        ? "bg-gradient-to-r from-indigo-400 to-purple-500"
+                        : "bg-gradient-to-r from-blue-400 to-indigo-500"
+                    }`}
+                    style={{ width: `${Math.min(100, detail.funding_progress_pct || 0)}%` }}
+                  />
+                </div>
+                <div className="flex justify-between mt-1.5">
+                  <span className="text-[11px] text-gray-500">₹{(detail.total_funded_amount || 0).toLocaleString("en-IN")} raised</span>
+                  <span className="text-[11px] text-gray-500">of ₹{detail.requested_amount.toLocaleString("en-IN")}</span>
+                </div>
+              </div>
+
+              {/* Investors list preview */}
+              {detail.investors && detail.investors.length > 0 && (
+                <div className="border-t border-gray-100 pt-3 mt-3">
+                  <p className="text-[10px] font-semibold text-gray-500 uppercase mb-2">Recent Investors</p>
+                  <div className="space-y-2 max-h-40 overflow-y-auto">
+                    {detail.investors.slice(0, 5).map((inv) => (
+                      <div key={inv.id} className="flex items-center justify-between text-xs">
+                        <div className="flex items-center gap-2">
+                          <div className="w-6 h-6 bg-indigo-100 rounded-full flex items-center justify-center">
+                            <span className="text-[10px] font-bold text-indigo-600">{inv.lender_name.charAt(0)}</span>
+                          </div>
+                          <div>
+                            <span className="font-semibold text-gray-800">{inv.lender_name}</span>
+                            <span className="text-[10px] text-gray-400 ml-1">({inv.ownership_percentage}%)</span>
+                          </div>
+                        </div>
+                        <span className="font-bold text-gray-700">₹{inv.invested_amount.toLocaleString("en-IN")}</span>
+                      </div>
+                    ))}
+                    {detail.investors.length > 5 && (
+                      <p className="text-[10px] text-indigo-500 text-center pt-1">+{detail.investors.length - 5} more investors</p>
+                    )}
+                  </div>
+                </div>
+              )}
+
+              {isOpen && (
+                <div className="mt-3 pt-3 border-t border-gray-100">
+                  <div className="flex justify-between text-xs text-gray-500 mb-1">
+                    <span>Remaining</span>
+                    <span className="font-bold text-indigo-600">₹{(detail.remaining_amount || 0).toLocaleString("en-IN")}</span>
+                  </div>
+                  <div className="flex justify-between text-xs text-gray-500">
+                    <span>Min. Investment</span>
+                    <span className="font-bold text-gray-700">₹{(detail.min_investment || 500).toLocaleString("en-IN")}</span>
+                  </div>
+                </div>
+              )}
+            </div>
+
             {/* Fund CTA Card */}
             {isOpen && isLender && (
               <div className="bg-gradient-to-br from-emerald-500 to-green-600 rounded-2xl p-6 text-white shadow-xl shadow-emerald-100">
                 <div className="flex items-center gap-2 mb-3">
                   <CircleDollarSign className="w-5 h-5" />
-                  <h3 className="text-base font-bold">Fund This Invoice</h3>
+                  <h3 className="text-base font-bold">Invest in This Invoice</h3>
                 </div>
                 <p className="text-emerald-100 text-xs mb-4 leading-relaxed">
-                  Earn up to {detail.max_interest_rate}% returns by funding this blockchain-verified invoice from a {detail.profile_status === "verified" ? "verified" : ""} business.
+                  Earn up to {detail.max_interest_rate}% returns by investing as little as ₹{(detail.min_investment || 500).toLocaleString("en-IN")} in this blockchain-verified invoice.
                 </p>
                 <div className="bg-white/15 backdrop-blur-sm rounded-xl p-3 mb-4 space-y-1.5 text-xs">
-                  <div className="flex justify-between"><span className="text-white/80">Amount</span><span className="font-bold">₹{detail.requested_amount.toLocaleString("en-IN")}</span></div>
+                  <div className="flex justify-between"><span className="text-white/80">Total Ask</span><span className="font-bold">₹{detail.requested_amount.toLocaleString("en-IN")}</span></div>
+                  <div className="flex justify-between"><span className="text-white/80">Remaining</span><span className="font-bold">₹{(detail.remaining_amount || detail.requested_amount).toLocaleString("en-IN")}</span></div>
                   <div className="flex justify-between"><span className="text-white/80">Max Returns</span><span className="font-bold">{detail.max_interest_rate}% p.a.</span></div>
                   <div className="flex justify-between"><span className="text-white/80">Tenure</span><span className="font-bold">{detail.repayment_period_days} days</span></div>
+                  <div className="flex justify-between"><span className="text-white/80">Investors</span><span className="font-bold">{detail.total_investors || 0}</span></div>
                 </div>
                 <button onClick={() => setShowFund(true)}
                   className="w-full py-3 bg-white text-emerald-700 rounded-xl text-sm font-bold hover:bg-emerald-50 transition-all active:scale-[0.98]">
@@ -832,16 +992,130 @@ export default function MarketplaceDetailPage() {
               </div>
             )}
 
+            {/* ──── AI NEGOTIATION CHAT ──── */}
+            {isOpen && isLender && (
+              <div className="bg-gradient-to-br from-violet-600 via-purple-600 to-indigo-700 rounded-2xl p-[1px] shadow-xl shadow-purple-100">
+                <div className="bg-gradient-to-br from-violet-600 via-purple-600 to-indigo-700 rounded-2xl p-6 text-white relative overflow-hidden">
+                  <div className="absolute inset-0 opacity-10" style={{ backgroundImage: "url(\"data:image/svg+xml,%3Csvg width='40' height='40' viewBox='0 0 40 40' xmlns='http://www.w3.org/2000/svg'%3E%3Cg fill='%23fff' fill-opacity='0.15'%3E%3Ccircle cx='20' cy='20' r='2'/%3E%3C/g%3E%3C/svg%3E\")" }} />
+                  <div className="relative">
+                    <div className="flex items-center gap-2 mb-2">
+                      <div className="w-8 h-8 bg-white/20 backdrop-blur-sm rounded-xl flex items-center justify-center">
+                        <Bot className="w-5 h-5" />
+                      </div>
+                      <div>
+                        <h3 className="text-sm font-bold">AI Negotiator</h3>
+                        <p className="text-[10px] text-white/60">Chat with AI Agent</p>
+                      </div>
+                    </div>
+
+                    <p className="text-violet-100 text-xs mb-4 leading-relaxed">
+                      Start a negotiation chat — our AI agent represents the vendor. Send your rate &amp; amount offer, and negotiate in real-time.
+                    </p>
+
+                    {/* Existing negotiations on this listing */}
+                    {listingNegotiations.length > 0 && (
+                      <div className="bg-white/10 backdrop-blur-sm rounded-xl p-3 mb-3">
+                        <p className="text-[10px] text-white/60 font-semibold mb-2 uppercase tracking-wider">
+                          Your Negotiations ({listingNegotiations.filter(n => n.lender.id === user?.lender_id).length})
+                        </p>
+                        <div className="space-y-1.5">
+                          {listingNegotiations.filter(n => n.lender.id === user?.lender_id).map((neg) => (
+                            <button key={neg.session_id} onClick={() => resumeChat(neg)}
+                              className="w-full flex items-center justify-between text-[11px] px-2.5 py-2 rounded-lg bg-white/10 hover:bg-white/20 transition-all text-left">
+                              <div className="flex items-center gap-2">
+                                <div className={`w-2 h-2 rounded-full ${neg.status === "active" ? "bg-green-400 animate-pulse" : neg.status === "accepted" ? "bg-emerald-400" : "bg-red-400"}`} />
+                                <span>Round {neg.current_round}/{neg.max_rounds}</span>
+                              </div>
+                              <div className="flex items-center gap-2">
+                                {neg.final_rate && <span className="font-bold text-emerald-300">{neg.final_rate}%</span>}
+                                <span className={`text-[9px] px-1.5 py-0.5 rounded-full font-semibold ${
+                                  neg.status === "active" ? "bg-green-400/30 text-green-200" :
+                                  neg.status === "accepted" ? "bg-emerald-400/30 text-emerald-200" :
+                                  "bg-red-400/30 text-red-200"
+                                }`}>{neg.status}</span>
+                              </div>
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+
+                    <button
+                      onClick={openNegotiationChat}
+                      disabled={chatLoading}
+                      className="w-full py-3 bg-white text-purple-700 rounded-xl text-sm font-bold hover:bg-purple-50 transition-all active:scale-[0.98] disabled:opacity-60 inline-flex items-center justify-center gap-2"
+                    >
+                      {chatLoading ? (
+                        <>
+                          <Loader2 className="w-4 h-4 animate-spin" />
+                          Opening chat...
+                        </>
+                      ) : (
+                        <>
+                          <MessageSquare className="w-4 h-4" />
+                          {listingNegotiations.some(n => n.lender.id === user?.lender_id && n.status === "active")
+                            ? "Continue Negotiation" : "Start Negotiation Chat"}
+                        </>
+                      )}
+                    </button>
+                    <p className="text-[10px] text-white/40 text-center mt-2">AI agent negotiates on behalf of the vendor</p>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* ──── Vendor: View Negotiations on this listing ──── */}
+            {isOpen && !isLender && listingNegotiations.length > 0 && (
+              <div className="bg-gradient-to-br from-violet-600 via-purple-600 to-indigo-700 rounded-2xl p-[1px] shadow-xl shadow-purple-100">
+                <div className="bg-gradient-to-br from-violet-600 via-purple-600 to-indigo-700 rounded-2xl p-6 text-white relative overflow-hidden">
+                  <div className="relative">
+                    <div className="flex items-center gap-2 mb-3">
+                      <div className="w-8 h-8 bg-white/20 backdrop-blur-sm rounded-xl flex items-center justify-center">
+                        <Bot className="w-5 h-5" />
+                      </div>
+                      <div>
+                        <h3 className="text-sm font-bold">AI Negotiations</h3>
+                        <p className="text-[10px] text-white/60">{listingNegotiations.length} negotiation(s) on this listing</p>
+                      </div>
+                    </div>
+                    <div className="space-y-2">
+                      {listingNegotiations.map((neg) => (
+                        <button key={neg.session_id} onClick={() => resumeChat(neg)}
+                          className="w-full bg-white/10 hover:bg-white/20 rounded-xl p-3 text-left transition-all">
+                          <div className="flex items-center justify-between mb-1">
+                            <span className="text-xs font-semibold">{neg.lender.name}</span>
+                            <span className={`text-[9px] px-2 py-0.5 rounded-full font-bold ${
+                              neg.status === "active" ? "bg-green-400/30 text-green-200" :
+                              neg.status === "accepted" ? "bg-emerald-400/30 text-emerald-200" :
+                              "bg-red-400/30 text-red-200"
+                            }`}>{neg.status}</span>
+                          </div>
+                          <div className="flex items-center gap-3 text-[10px] text-white/60">
+                            <span>Round {neg.current_round}/{neg.max_rounds}</span>
+                            {neg.final_rate && <span className="text-emerald-300 font-semibold">Final: {neg.final_rate}%</span>}
+                            <span>{neg.messages.length} messages</span>
+                          </div>
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
+
             {/* Funded info */}
-            {detail.listing_status === "funded" && detail.funded_amount && (
+            {detail.listing_status === "funded" && (detail.total_funded_amount || 0) > 0 && (
               <div className="bg-blue-50 border border-blue-200 rounded-2xl p-5">
-                <div className="flex items-center gap-2 mb-2">
-                  <CheckCircle className="w-5 h-5 text-blue-600" />
-                  <h3 className="text-sm font-bold text-blue-800">Investment Active</h3>
+                <div className="flex items-center justify-between mb-2">
+                  <div className="flex items-center gap-2">
+                    <CheckCircle className="w-5 h-5 text-blue-600" />
+                    <h3 className="text-sm font-bold text-blue-800">Investment Active</h3>
+                  </div>
+                  <span className="text-xs font-bold text-blue-500">{detail.total_investors || 0} investor{(detail.total_investors || 0) !== 1 ? "s" : ""}</span>
                 </div>
                 <div className="space-y-2 text-xs">
-                  <div className="flex justify-between"><span className="text-blue-600">Funded</span><span className="font-bold text-blue-900">₹{detail.funded_amount.toLocaleString("en-IN")}</span></div>
-                  <div className="flex justify-between"><span className="text-blue-600">Lender</span><span className="font-bold text-blue-900">{detail.funded_by}</span></div>
+                  <div className="flex justify-between"><span className="text-blue-600">Total Funded</span><span className="font-bold text-blue-900">₹{(detail.total_funded_amount || 0).toLocaleString("en-IN")}</span></div>
+                  <div className="flex justify-between"><span className="text-blue-600">Funding Mode</span><span className="font-bold text-blue-900">Community Pot (Fractional)</span></div>
                   <div className="flex justify-between"><span className="text-blue-600">Date</span><span className="font-bold text-blue-900">{detail.funded_at ? new Date(detail.funded_at).toLocaleDateString("en-IN") : "—"}</span></div>
                 </div>
 
@@ -1016,11 +1290,12 @@ export default function MarketplaceDetailPage() {
             <div className="flex items-center justify-between mb-6">
               <div>
                 <h2 className="text-xl font-bold text-gray-900 flex items-center gap-2">
-                  <HandCoins className="w-5 h-5 text-emerald-500" /> Fund Invoice
+                  <HandCoins className="w-5 h-5 text-emerald-500" /> Invest in Invoice
                 </h2>
                 <p className="text-xs text-gray-500 mt-1">
                   Max interest: <span className="font-bold text-emerald-600">{detail.max_interest_rate}%</span> ·
-                  Ask: <span className="font-bold">₹{detail.requested_amount.toLocaleString("en-IN")}</span>
+                  Remaining: <span className="font-bold text-indigo-600">₹{(detail.remaining_amount || detail.requested_amount).toLocaleString("en-IN")}</span>
+                  <span className="text-gray-400 ml-1">of ₹{detail.requested_amount.toLocaleString("en-IN")}</span>
                 </p>
               </div>
               <button onClick={() => setShowFund(false)} className="p-2 hover:bg-gray-100 rounded-xl transition-colors">
@@ -1043,9 +1318,19 @@ export default function MarketplaceDetailPage() {
                 )}
               </div>
               <div>
-                <label className="block text-xs font-semibold text-gray-700 mb-1.5">Funded Amount (₹) *</label>
+                <label className="block text-xs font-semibold text-gray-700 mb-1.5">Investment Amount (₹) *</label>
                 <input type="number" value={fundForm.funded_amount || ""} onChange={(e) => setFundForm({ ...fundForm, funded_amount: Number(e.target.value) })}
-                  className={inputCls} placeholder={`Max ₹${detail.requested_amount.toLocaleString("en-IN")}`} />
+                  className={inputCls} placeholder={`Min ₹${(detail.min_investment || 500).toLocaleString("en-IN")} · Max ₹${(detail.remaining_amount || detail.requested_amount).toLocaleString("en-IN")}`} />
+                {fundForm.funded_amount > 0 && fundForm.funded_amount < (detail.min_investment || 500) && (
+                  <p className="text-xs text-red-500 mt-1 flex items-center gap-1">
+                    <AlertTriangle className="w-3 h-3" /> Minimum investment is ₹{(detail.min_investment || 500).toLocaleString("en-IN")}
+                  </p>
+                )}
+                {fundForm.funded_amount > (detail.remaining_amount || detail.requested_amount) && (
+                  <p className="text-xs text-red-500 mt-1 flex items-center gap-1">
+                    <AlertTriangle className="w-3 h-3" /> Exceeds remaining amount of ₹{(detail.remaining_amount || detail.requested_amount).toLocaleString("en-IN")}
+                  </p>
+                )}
               </div>
               <div>
                 <label className="block text-xs font-semibold text-gray-700 mb-1.5">Offered Interest Rate (%) *</label>
@@ -1087,6 +1372,219 @@ export default function MarketplaceDetailPage() {
               <Lock className="w-3 h-3 text-gray-400" />
               <span className="text-[10px] text-gray-400">Payments secured by <span className="font-semibold text-indigo-600">InvoX Pay</span> · 256-bit SSL encrypted</span>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* ─── AI Negotiation Chat Modal ─── */}
+      {showChat && chatSession && (
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4" onClick={() => setShowChat(false)}>
+          <div className="bg-white rounded-3xl w-full max-w-2xl max-h-[90vh] shadow-2xl flex flex-col" onClick={(e) => e.stopPropagation()}>
+            {/* Header */}
+            <div className="p-5 border-b border-gray-100 flex-shrink-0">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-3">
+                  <div className="w-10 h-10 bg-gradient-to-br from-violet-500 to-purple-600 rounded-xl flex items-center justify-center shadow-lg shadow-purple-200">
+                    <Bot className="w-6 h-6 text-white" />
+                  </div>
+                  <div>
+                    <h2 className="text-lg font-bold text-gray-900">AI Negotiation Chat</h2>
+                    <p className="text-xs text-gray-400">
+                      {chatSession.lender.name} ↔ {chatSession.vendor.business_name} · Round {chatSession.current_round}/{chatSession.max_rounds}
+                    </p>
+                  </div>
+                </div>
+                <div className="flex items-center gap-2">
+                  <span className={`text-[10px] font-bold px-2.5 py-1 rounded-full ${
+                    chatSession.status === "active" ? "bg-green-50 text-green-700 border border-green-200" :
+                    chatSession.status === "accepted" ? "bg-emerald-50 text-emerald-700 border border-emerald-200" :
+                    chatSession.status === "rejected" ? "bg-red-50 text-red-700 border border-red-200" :
+                    "bg-gray-50 text-gray-700 border border-gray-200"
+                  }`}>{chatSession.status.toUpperCase()}</span>
+                  <button onClick={() => setShowChat(false)} className="p-2 hover:bg-gray-100 rounded-xl transition-colors">
+                    <X className="w-5 h-5 text-gray-400" />
+                  </button>
+                </div>
+              </div>
+
+              {/* Context bar — Community Pot aware */}
+              <div className="flex gap-2 mt-3">
+                <div className="flex-1 bg-gray-50 rounded-lg p-2 text-center">
+                  <p className="text-[9px] text-gray-400 uppercase">Full Ask</p>
+                  <p className="text-xs font-bold text-gray-900">₹{chatSession.invoice_amount?.toLocaleString("en-IN")}</p>
+                </div>
+                <div className="flex-1 bg-indigo-50 rounded-lg p-2 text-center">
+                  <p className="text-[9px] text-indigo-400 uppercase">Remaining</p>
+                  <p className="text-xs font-bold text-indigo-700">₹{(chatSession.remaining_amount || chatSession.invoice_amount)?.toLocaleString("en-IN")}</p>
+                </div>
+                <div className="flex-1 bg-gray-50 rounded-lg p-2 text-center">
+                  <p className="text-[9px] text-gray-400 uppercase">Fair Rate</p>
+                  <p className="text-xs font-bold text-gray-900">{chatSession.fair_market_rate}%</p>
+                </div>
+                <div className="flex-1 bg-gray-50 rounded-lg p-2 text-center">
+                  <p className="text-[9px] text-gray-400 uppercase">Max Rate</p>
+                  <p className="text-xs font-bold text-gray-900">{chatSession.max_interest_rate}%</p>
+                </div>
+                {(chatSession.total_investors || 0) > 0 && (
+                  <div className="flex-1 bg-purple-50 rounded-lg p-2 text-center">
+                    <p className="text-[9px] text-purple-400 uppercase">Investors</p>
+                    <p className="text-xs font-bold text-purple-700">{chatSession.total_investors}</p>
+                  </div>
+                )}
+                {chatSession.final_rate && (
+                  <div className="flex-1 bg-emerald-50 rounded-lg p-2 text-center">
+                    <p className="text-[9px] text-emerald-500 uppercase">Final</p>
+                    <p className="text-xs font-bold text-emerald-700">{chatSession.final_rate}%</p>
+                  </div>
+                )}
+              </div>
+            </div>
+
+            {/* Chat Messages */}
+            <div className="flex-1 overflow-y-auto p-5 space-y-3 bg-gray-50/50" id="chat-messages">
+              {chatSession.messages.map((msg) => (
+                <div key={msg.id} className={`flex ${msg.sender === "lender" ? "justify-end" : "justify-start"}`}>
+                  <div className={`max-w-[80%] ${msg.sender === "lender" ? "order-1" : ""}`}>
+                    <div className="flex items-end gap-2">
+                      {msg.sender !== "lender" && (
+                        <div className={`w-7 h-7 rounded-full flex items-center justify-center flex-shrink-0 ${
+                          msg.sender === "ai_agent" ? "bg-gradient-to-br from-violet-500 to-purple-600" : "bg-gray-300"
+                        }`}>
+                          {msg.sender === "ai_agent" ? <Bot className="w-4 h-4 text-white" /> : <Info className="w-4 h-4 text-gray-500" />}
+                        </div>
+                      )}
+                      <div className={`rounded-2xl px-4 py-3 ${
+                        msg.sender === "lender"
+                          ? "bg-indigo-600 text-white rounded-br-md"
+                          : msg.sender === "ai_agent"
+                          ? "bg-white border border-gray-200 text-gray-800 rounded-bl-md shadow-sm"
+                          : "bg-gray-200 text-gray-600 rounded-bl-md"
+                      }`}>
+                        <p className="text-[13px] leading-relaxed whitespace-pre-wrap">{msg.message}</p>
+                        {/* Offer details bar */}
+                        {msg.offered_rate && (
+                          <div className={`flex gap-3 mt-2 pt-2 text-[10px] ${
+                            msg.sender === "lender" ? "border-t border-white/20 text-white/70" : "border-t border-gray-100 text-gray-400"
+                          }`}>
+                            <span>Rate: <span className="font-bold">{msg.offered_rate}%</span></span>
+                            {msg.offered_amount && <span>₹{msg.offered_amount.toLocaleString("en-IN")}</span>}
+                            {msg.funding_percentage && <span>{msg.funding_percentage}%</span>}
+                            {msg.offer_score && <span>Score: {msg.offer_score}/100</span>}
+                          </div>
+                        )}
+                      </div>
+                      {msg.sender === "lender" && (
+                        <div className="w-7 h-7 rounded-full bg-indigo-100 flex items-center justify-center flex-shrink-0">
+                          <Building2 className="w-4 h-4 text-indigo-600" />
+                        </div>
+                      )}
+                    </div>
+                    <p className={`text-[9px] text-gray-400 mt-1 ${msg.sender === "lender" ? "text-right mr-9" : "ml-9"}`}>
+                      {msg.sender === "ai_agent" ? "AI Agent" : msg.sender === "lender" ? "You" : "System"}
+                      {msg.created_at && ` · ${new Date(msg.created_at).toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" })}`}
+                    </p>
+                  </div>
+                </div>
+              ))}
+
+              {/* Accepted banner */}
+              {chatSession.status === "accepted" && (
+                <div className="bg-emerald-50 border border-emerald-200 rounded-xl p-4 text-center">
+                  <div className="flex items-center justify-center gap-2 mb-1">
+                    <CheckCircle className="w-5 h-5 text-emerald-600" />
+                    <span className="text-sm font-bold text-emerald-800">Deal Accepted!</span>
+                  </div>
+                  <p className="text-xs text-emerald-600">
+                    Final rate: <span className="font-bold">{chatSession.final_rate}%</span> · Amount: <span className="font-bold">₹{chatSession.final_amount?.toLocaleString("en-IN")}</span>
+                    {chatSession.final_score && <> · Score: <span className="font-bold">{chatSession.final_score}/100</span></>}
+                  </p>
+                </div>
+              )}
+              {chatSession.status === "rejected" && (
+                <div className="bg-red-50 border border-red-200 rounded-xl p-4 text-center">
+                  <div className="flex items-center justify-center gap-2 mb-1">
+                    <AlertCircle className="w-5 h-5 text-red-600" />
+                    <span className="text-sm font-bold text-red-800">Negotiation Ended</span>
+                  </div>
+                  <p className="text-xs text-red-600">No agreement was reached. You can start a new negotiation.</p>
+                </div>
+              )}
+            </div>
+
+            {/* Offer Input Form — only if active */}
+            {chatSession.status === "active" && isLender && (
+              <div className="p-4 border-t border-gray-100 flex-shrink-0 bg-white rounded-b-3xl">
+                <div className="flex gap-2 mb-3">
+                  <div className="flex-1">
+                    <label className="block text-[10px] font-semibold text-gray-500 mb-1 uppercase">Interest Rate (%)</label>
+                    <input
+                      type="number" step="0.1" value={offerForm.rate || ""}
+                      onChange={(e) => setOfferForm({ ...offerForm, rate: Number(e.target.value) })}
+                      className="w-full px-3 py-2 border border-gray-200 rounded-xl text-sm text-gray-900 focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none"
+                      placeholder="e.g. 12.5"
+                    />
+                  </div>
+                  <div className="flex-1">
+                    <label className="block text-[10px] font-semibold text-gray-500 mb-1 uppercase">Investment Amount (₹)</label>
+                    <input
+                      type="number" value={offerForm.amount || ""}
+                      onChange={(e) => setOfferForm({ ...offerForm, amount: Number(e.target.value) })}
+                      className="w-full px-3 py-2 border border-gray-200 rounded-xl text-sm text-gray-900 focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none"
+                      placeholder={`₹${(chatSession.min_investment || 500).toLocaleString("en-IN")} – ₹${(chatSession.remaining_amount || chatSession.invoice_amount)?.toLocaleString("en-IN")}`}
+                    />
+                  </div>
+                </div>
+                <div className="flex gap-2">
+                  <input
+                    type="text" value={offerForm.message}
+                    onChange={(e) => setOfferForm({ ...offerForm, message: e.target.value })}
+                    className="flex-1 px-3 py-2.5 border border-gray-200 rounded-xl text-sm text-gray-900 focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none"
+                    placeholder="Optional message..."
+                    onKeyDown={(e) => { if (e.key === "Enter" && offerForm.rate > 0 && offerForm.amount > 0) sendOffer(); }}
+                  />
+                  <button
+                    onClick={sendOffer}
+                    disabled={sendingOffer || offerForm.rate <= 0 || offerForm.amount <= 0}
+                    className="px-5 py-2.5 bg-gradient-to-r from-indigo-500 to-purple-600 text-white rounded-xl text-sm font-bold hover:shadow-lg hover:shadow-indigo-200 disabled:opacity-50 inline-flex items-center gap-2 transition-all active:scale-[0.98]"
+                  >
+                    {sendingOffer ? <Loader2 className="w-4 h-4 animate-spin" /> : <Zap className="w-4 h-4" />}
+                    Send Offer
+                  </button>
+                </div>
+                <p className="text-[10px] text-gray-400 mt-2 text-center">
+                  Round {chatSession.current_round}/{chatSession.max_rounds} · AI agent will respond on vendor&apos;s behalf
+                </p>
+              </div>
+            )}
+
+            {/* Accept & Fund button - for accepted deals */}
+            {chatSession.status === "accepted" && isLender && (
+              <div className="p-4 border-t border-gray-100 flex-shrink-0 bg-white rounded-b-3xl">
+                <div className="bg-emerald-50 border border-emerald-200 rounded-xl p-3 mb-3 text-xs">
+                  <p className="font-semibold text-emerald-800 mb-1">Deal Accepted!</p>
+                  <div className="flex justify-between text-emerald-600">
+                    <span>Rate: <b>{chatSession.final_rate}%</b></span>
+                    <span>Amount: <b>₹{(chatSession.final_amount || 0).toLocaleString("en-IN")}</b></span>
+                  </div>
+                </div>
+                <button
+                  onClick={acceptAndFund}
+                  className="w-full py-3 bg-gradient-to-r from-emerald-500 to-green-600 text-white rounded-xl text-sm font-bold hover:shadow-lg hover:shadow-green-200 transition-all active:scale-[0.98] inline-flex items-center justify-center gap-2"
+                >
+                  <CheckCircle className="w-4 h-4" /> Invest ₹{(chatSession.final_amount || 0).toLocaleString("en-IN")} at {chatSession.final_rate}%
+                </button>
+              </div>
+            )}
+
+            {/* Vendor view footer */}
+            {!isLender && (
+              <div className="p-4 border-t border-gray-100 flex-shrink-0 bg-white rounded-b-3xl">
+                <p className="text-xs text-gray-500 text-center flex items-center justify-center gap-2">
+                  <Bot className="w-4 h-4 text-purple-500" />
+                  AI agent is negotiating on your behalf · {chatSession.messages.length} messages
+                </p>
+              </div>
+            )}
           </div>
         </div>
       )}

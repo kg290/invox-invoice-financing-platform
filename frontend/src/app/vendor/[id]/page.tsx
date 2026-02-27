@@ -10,7 +10,6 @@ import {
   Building2,
   Receipt,
   Wallet,
-  UserCheck,
   ArrowLeft,
   Shield,
   AlertTriangle,
@@ -18,7 +17,6 @@ import {
   Clock,
   Upload,
   Loader2,
-  Fingerprint,
 } from "lucide-react";
 import { toast } from "sonner";
 import api from "@/lib/api";
@@ -202,27 +200,7 @@ export default function VendorDetail() {
         </div>
 
         {/* Quick Actions */}
-        <div className="grid sm:grid-cols-5 gap-3 mb-6">
-          <Link href={`/vendor/${vendorId}/verify`}
-            className="flex items-center gap-3 bg-white border rounded-xl p-4 hover:shadow-md transition-shadow group">
-            <div className="w-10 h-10 bg-green-50 rounded-lg flex items-center justify-center group-hover:bg-green-100 transition-colors">
-              <UserCheck className="w-5 h-5 text-green-600" />
-            </div>
-            <div>
-              <p className="text-sm font-semibold text-gray-900">Verify</p>
-              <p className="text-xs text-gray-500">Check genuineness</p>
-            </div>
-          </Link>
-          <Link href="/kyc"
-            className="flex items-center gap-3 bg-white border rounded-xl p-4 hover:shadow-md transition-shadow group">
-            <div className="w-10 h-10 bg-indigo-50 rounded-lg flex items-center justify-center group-hover:bg-indigo-100 transition-colors">
-              <Fingerprint className="w-5 h-5 text-indigo-600" />
-            </div>
-            <div>
-              <p className="text-sm font-semibold text-gray-900">KYC</p>
-              <p className="text-xs text-gray-500">Identity check</p>
-            </div>
-          </Link>
+        <div className="grid sm:grid-cols-4 gap-3 mb-6">
           <Link href={`/vendor/${vendorId}/invoices`}
             className="flex items-center gap-3 bg-white border rounded-xl p-4 hover:shadow-md transition-shadow group">
             <div className="w-10 h-10 bg-blue-50 rounded-lg flex items-center justify-center group-hover:bg-blue-100 transition-colors">
@@ -241,6 +219,16 @@ export default function VendorDetail() {
             <div>
               <p className="text-sm font-semibold text-gray-900">New Invoice</p>
               <p className="text-xs text-gray-500">Create GST bill</p>
+            </div>
+          </Link>
+          <Link href={`/vendor/${vendorId}/repayments`}
+            className="flex items-center gap-3 bg-white border rounded-xl p-4 hover:shadow-md transition-shadow group">
+            <div className="w-10 h-10 bg-emerald-50 rounded-lg flex items-center justify-center group-hover:bg-emerald-100 transition-colors">
+              <Wallet className="w-5 h-5 text-emerald-600" />
+            </div>
+            <div>
+              <p className="text-sm font-semibold text-gray-900">Repayments</p>
+              <p className="text-xs text-gray-500">Pay installments</p>
             </div>
           </Link>
           <Link href="/marketplace"
@@ -373,7 +361,7 @@ export default function VendorDetail() {
           {/* Nominee Details */}
           <div className="bg-white rounded-2xl shadow-sm border border-gray-200 p-6">
             <h2 className="text-lg font-semibold text-gray-900 mb-4 flex items-center gap-2">
-              <UserCheck className="w-5 h-5 text-blue-600" /> Nominee Details
+              <User className="w-5 h-5 text-blue-600" /> Nominee Details
             </h2>
             <dl className="grid grid-cols-2 gap-4">
               <InfoItem label="Name" value={vendor.nominee_name} />

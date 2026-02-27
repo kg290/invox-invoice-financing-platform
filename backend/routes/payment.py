@@ -29,6 +29,7 @@ from database import get_db
 from models import (
     Payment, MarketplaceListing, RepaymentSchedule, Invoice,
     Lender, Vendor, User, Notification, ActivityLog, BlockchainBlock,
+    FractionalInvestment,
 )
 from blockchain import add_block
 from routes.auth import get_current_user
@@ -164,14 +165,15 @@ def create_funding_order(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """Create an InvoX Pay order for invoice funding."""
+    """Create an InvoX Pay order for invoice funding (supports fractional/Community Pot)."""
     listing = db.query(MarketplaceListing).filter(MarketplaceListing.id == data.listing_id).first()
     if not listing:
         raise HTTPException(status_code=404, detail="Listing not found")
-    if listing.listing_status != "open":
+    if listing.listing_status not in ("open", "partially_funded"):
         raise HTTPException(status_code=400, detail=f"Listing is '{listing.listing_status}', not open for funding")
-    if data.funded_amount > listing.requested_amount:
-        raise HTTPException(status_code=400, detail="Funded amount exceeds requested amount")
+    remaining = listing.requested_amount - (listing.total_funded_amount or 0)
+    if data.funded_amount > remaining + 0.01:
+        raise HTTPException(status_code=400, detail=f"Amount exceeds remaining ₹{remaining:,.0f}")
     if data.offered_interest_rate > listing.max_interest_rate:
         raise HTTPException(status_code=400, detail=f"Interest rate ({data.offered_interest_rate}%) exceeds max ({listing.max_interest_rate}%)")
 
@@ -381,7 +383,7 @@ def verify_payment(
 
 
 def _process_funding_payment(payment: Payment, db: Session) -> dict:
-    """Process a verified funding payment — marks listing as funded, generates repayment schedule."""
+    """Process a verified funding payment — creates fractional investment, updates listing (Community Pot)."""
     listing = db.query(MarketplaceListing).filter(MarketplaceListing.id == payment.listing_id).first()
     if not listing:
         db.commit()
@@ -392,22 +394,20 @@ def _process_funding_payment(payment: Payment, db: Session) -> dict:
     offered_interest_rate = float(notes.get("offered_interest_rate", 12))
 
     lender = db.query(Lender).filter(Lender.id == lender_id).first() if lender_id else None
-
-    listing.listing_status = "funded"
-    listing.funded_amount = payment.amount
-    listing.funded_by = lender.name if lender else payment.payer_name
-    listing.lender_id = lender.id if lender else None
-    listing.funded_at = datetime.now(timezone.utc)
-
     invoice = db.query(Invoice).filter(Invoice.id == listing.invoice_id).first()
 
+    # ── Create FractionalInvestment record ──
+    ownership_pct = round((payment.amount / listing.requested_amount) * 100, 2)
+    expected_return = round((payment.amount * offered_interest_rate / 100) * (listing.repayment_period_days / 365), 2)
+
     block_data = {
-        "type": "funding",
+        "type": "fractional_funding",
         "listing_id": listing.id,
         "invoice_number": invoice.invoice_number if invoice else "",
         "lender_id": lender.id if lender else None,
         "lender_name": lender.name if lender else payment.payer_name,
         "funded_amount": payment.amount,
+        "ownership_pct": ownership_pct,
         "offered_interest_rate": offered_interest_rate,
         "payment_id": payment.gateway_payment_id,
         "gateway": "invox_pay",
@@ -415,61 +415,122 @@ def _process_funding_payment(payment: Payment, db: Session) -> dict:
     }
     block = add_block(db, "funding", block_data)
 
-    num_installments = max(1, listing.repayment_period_days // 30)
-    principal_per = round(payment.amount / num_installments, 2)
-    annual_rate = offered_interest_rate / 100
+    frac = FractionalInvestment(
+        listing_id=listing.id,
+        lender_id=lender.id if lender else None,
+        user_id=payment.user_id,
+        invested_amount=payment.amount,
+        offered_interest_rate=offered_interest_rate,
+        ownership_percentage=ownership_pct,
+        expected_return=expected_return,
+        payment_id=payment.gateway_payment_id,
+        blockchain_hash=block.block_hash,
+        status="active",
+    )
+    db.add(frac)
 
-    for i in range(1, num_installments + 1):
-        due = datetime.now(timezone.utc) + timedelta(days=30 * i)
-        interest_amt = round((payment.amount * annual_rate * 30) / 365, 2)
-        sched = RepaymentSchedule(
-            listing_id=listing.id,
-            installment_number=i,
-            due_date=due.strftime("%Y-%m-%d"),
-            principal_amount=principal_per,
-            interest_amount=interest_amt,
-            total_amount=round(principal_per + interest_amt, 2),
-            status="pending",
-        )
-        db.add(sched)
+    # ── Update listing aggregates ──
+    new_total = (listing.total_funded_amount or 0) + payment.amount
+    listing.total_funded_amount = round(new_total, 2)
+    listing.total_investors = (listing.total_investors or 0) + 1
 
-    vendor_user = db.query(User).filter(User.vendor_id == listing.vendor_id).first()
-    if vendor_user:
-        db.add(Notification(
-            user_id=vendor_user.id,
-            title="Invoice Funded! 🎉",
-            message=f"Your invoice has been funded ₹{payment.amount:,.0f} by {lender.name if lender else payment.payer_name} via InvoX Pay. Repayment in {num_installments} installments.",
-            notification_type="funding",
-            link=f"/vendor/{listing.vendor_id}/invoices",
-        ))
+    fully_funded = new_total >= listing.requested_amount - 0.01
+    num_installments = 0
+
+    if fully_funded:
+        listing.listing_status = "funded"
+        listing.funded_amount = round(new_total, 2)
+        listing.funded_at = datetime.now(timezone.utc)
+        if listing.total_investors == 1:
+            listing.lender_id = lender.id if lender else None
+            listing.funded_by = lender.name if lender else payment.payer_name
+        else:
+            listing.funded_by = f"{listing.total_investors} investors"
+
+        # Generate repayment schedule with weighted average rate
+        all_fracs = db.query(FractionalInvestment).filter(
+            FractionalInvestment.listing_id == listing.id,
+            FractionalInvestment.status == "active",
+        ).all()
+        total_weighted_rate = sum(f.invested_amount * f.offered_interest_rate for f in all_fracs)
+        avg_rate = total_weighted_rate / new_total if new_total > 0 else offered_interest_rate
+
+        num_installments = max(1, listing.repayment_period_days // 30)
+        principal_per = round(new_total / num_installments, 2)
+        annual_rate = avg_rate / 100
+
+        for i in range(1, num_installments + 1):
+            due = datetime.now(timezone.utc) + timedelta(days=30 * i)
+            interest_amt = round((new_total * annual_rate * 30) / 365, 2)
+            sched = RepaymentSchedule(
+                listing_id=listing.id,
+                installment_number=i,
+                due_date=due.strftime("%Y-%m-%d"),
+                principal_amount=principal_per,
+                interest_amount=interest_amt,
+                total_amount=round(principal_per + interest_amt, 2),
+                status="pending",
+            )
+            db.add(sched)
+
+        vendor_user = db.query(User).filter(User.vendor_id == listing.vendor_id).first()
+        if vendor_user:
+            db.add(Notification(
+                user_id=vendor_user.id,
+                title="Invoice Fully Funded! 🎉",
+                message=f"Your invoice has been fully funded ₹{new_total:,.0f} by {listing.total_investors} investor(s) via InvoX Pay. Repayment in {num_installments} installments.",
+                notification_type="funding",
+                link=f"/vendor/{listing.vendor_id}/invoices",
+            ))
+    else:
+        listing.listing_status = "partially_funded"
+        vendor_user = db.query(User).filter(User.vendor_id == listing.vendor_id).first()
+        if vendor_user:
+            pct = round(new_total / listing.requested_amount * 100, 1)
+            db.add(Notification(
+                user_id=vendor_user.id,
+                title="New Investment Received! 💰",
+                message=f"{lender.name if lender else payment.payer_name} invested ₹{payment.amount:,.0f} via InvoX Pay ({pct}% funded, {listing.total_investors} investor(s)).",
+                notification_type="funding",
+                link=f"/vendor/{listing.vendor_id}/invoices",
+            ))
 
     lender_user = db.query(User).filter(User.lender_id == lender.id).first() if lender else None
     if lender_user:
         db.add(Notification(
             user_id=lender_user.id,
-            title="Funding Confirmed ✅",
-            message=f"Payment of ₹{payment.amount:,.0f} confirmed for invoice {invoice.invoice_number if invoice else ''}. Repayment in {num_installments} installments.",
+            title="Investment Confirmed ✅",
+            message=f"₹{payment.amount:,.0f} ({ownership_pct}% ownership) confirmed for invoice {invoice.invoice_number if invoice else ''}. Expected return: ₹{expected_return:,.0f}.",
             notification_type="funding",
             link=f"/marketplace/{listing.id}",
         ))
 
     db.add(ActivityLog(
         entity_type="listing", entity_id=listing.id,
-        action="funded",
-        description=f"Listing funded ₹{payment.amount:,.0f} via InvoX Pay by {lender.name if lender else payment.payer_name}",
+        action="fractional_funded",
+        description=f"₹{payment.amount:,.0f} invested via InvoX Pay by {lender.name if lender else payment.payer_name} ({ownership_pct}% slice)",
         metadata_json=json.dumps({
             "payment_id": payment.gateway_payment_id,
             "amount": payment.amount,
+            "ownership_pct": ownership_pct,
+            "total_funded": new_total,
+            "total_investors": listing.total_investors,
             "gateway": "invox_pay",
         }),
     ))
 
     db.commit()
     return {
-        "funded_amount": payment.amount,
+        "invested_amount": payment.amount,
+        "ownership_percentage": ownership_pct,
+        "expected_return": expected_return,
         "lender": lender.name if lender else payment.payer_name,
         "blockchain_hash": block.block_hash,
-        "installments": num_installments,
+        "total_funded_amount": listing.total_funded_amount,
+        "total_investors": listing.total_investors,
+        "funding_progress_pct": round(new_total / listing.requested_amount * 100, 1),
+        "fully_funded": fully_funded,
+        "installments": num_installments if fully_funded else 0,
     }
 
 

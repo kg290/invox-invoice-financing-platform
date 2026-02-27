@@ -7,7 +7,7 @@ import Link from "next/link";
 import {
   FileText, Loader2, IndianRupee, TrendingUp, AlertCircle, Clock,
   Store, BarChart3, PieChart as PieIcon, Activity, Bell, Briefcase,
-  ArrowUpRight, Wallet, Target, Shield,
+  ArrowUpRight, Wallet, Target,
 } from "lucide-react";
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
@@ -82,9 +82,9 @@ export default function LenderDashboard() {
 
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6 space-y-6">
         {/* Welcome Banner */}
-        <div className="bg-gradient-to-r from-purple-600 to-indigo-700 rounded-2xl p-6 text-white">
-          <h1 className="text-xl font-bold">Welcome, {data.lender.name}</h1>
-          <p className="text-purple-200 text-sm mt-1">{data.lender.organization} · {data.lender.lender_type}</p>
+        <div className="bg-gradient-to-r from-purple-600 to-indigo-700 rounded-xl p-5 text-white">
+          <h1 className="text-lg font-bold">Welcome, {data.lender.name}</h1>
+          <p className="text-purple-200 text-xs mt-0.5">{data.lender.organization} · {data.lender.lender_type}</p>
         </div>
 
         {/* KPI Cards */}
@@ -118,7 +118,7 @@ export default function LenderDashboard() {
             <h2 className="text-sm font-semibold text-gray-800 mb-4 flex items-center gap-2">
               <BarChart3 className="w-4 h-4 text-purple-500" /> Monthly Funding Trend
             </h2>
-            <ResponsiveContainer width="100%" height={250}>
+            <ResponsiveContainer width="100%" height={220}>
               <LineChart data={data.monthly_trend}>
                 <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
                 <XAxis dataKey="month" tick={{ fontSize: 11 }} />
@@ -126,7 +126,7 @@ export default function LenderDashboard() {
                 <Tooltip formatter={(val) => `₹${Number(val).toLocaleString("en-IN")}`} />
                 <Legend wrapperStyle={{ fontSize: 11 }} />
                 <Line type="monotone" dataKey="funded" name="Funded" stroke="#8b5cf6" strokeWidth={2} dot={{ r: 3 }} />
-                <Line type="monotone" dataKey="returns" name="Returns" stroke="#22c55e" strokeWidth={2} dot={{ r: 3 }} />
+                <Line type="monotone" dataKey="settled" name="Returns" stroke="#22c55e" strokeWidth={2} dot={{ r: 3 }} />
               </LineChart>
             </ResponsiveContainer>
           </div>
@@ -137,7 +137,7 @@ export default function LenderDashboard() {
               <PieIcon className="w-4 h-4 text-red-500" /> Risk Distribution
             </h2>
             {riskPie.length > 0 ? (
-              <ResponsiveContainer width="100%" height={250}>
+              <ResponsiveContainer width="100%" height={220}>
                 <PieChart>
                   <Pie data={riskPie} cx="50%" cy="50%" innerRadius={60} outerRadius={90}
                     paddingAngle={3} dataKey="value"
@@ -150,7 +150,7 @@ export default function LenderDashboard() {
                 </PieChart>
               </ResponsiveContainer>
             ) : (
-              <div className="flex items-center justify-center h-[250px] text-gray-400 text-sm">No risk data</div>
+              <div className="flex items-center justify-center h-[200px] text-gray-400 text-sm">No risk data</div>
             )}
           </div>
         </div>
@@ -163,7 +163,7 @@ export default function LenderDashboard() {
               <Store className="w-4 h-4 text-blue-500" /> Business Type Distribution
             </h2>
             {bizPie.length > 0 ? (
-              <ResponsiveContainer width="100%" height={250}>
+              <ResponsiveContainer width="100%" height={220}>
                 <BarChart data={bizPie} layout="vertical">
                   <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
                   <XAxis type="number" tick={{ fontSize: 11 }} />
@@ -177,7 +177,7 @@ export default function LenderDashboard() {
                 </BarChart>
               </ResponsiveContainer>
             ) : (
-              <div className="flex items-center justify-center h-[250px] text-gray-400 text-sm">No business data</div>
+              <div className="flex items-center justify-center h-[200px] text-gray-400 text-sm">No business data</div>
             )}
           </div>
 
@@ -187,7 +187,7 @@ export default function LenderDashboard() {
               <Clock className="w-4 h-4 text-amber-500" /> Upcoming Repayments
             </h2>
             {data.upcoming_repayments.length > 0 ? (
-              <div className="space-y-2 max-h-[250px] overflow-y-auto">
+              <div className="space-y-2 max-h-[220px] overflow-y-auto">
                 {data.upcoming_repayments.map((r) => (
                   <div key={`${r.listing_id}-${r.installment}`} className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
                     <div>
@@ -202,7 +202,7 @@ export default function LenderDashboard() {
                 ))}
               </div>
             ) : (
-              <div className="flex items-center justify-center h-[250px] text-gray-400 text-sm">No upcoming repayments</div>
+              <div className="flex items-center justify-center h-[200px] text-gray-400 text-sm">No upcoming repayments</div>
             )}
           </div>
         </div>
@@ -239,15 +239,15 @@ export default function LenderDashboard() {
             <Store className="w-6 h-6 mx-auto mb-1" />
             <p className="text-sm font-medium">Browse Marketplace</p>
           </Link>
-          <Link href="/kyc"
-            className="bg-amber-600 text-white rounded-xl p-4 text-center hover:bg-amber-700 transition-colors">
-            <Shield className="w-6 h-6 mx-auto mb-1" />
-            <p className="text-sm font-medium">KYC Verification</p>
-          </Link>
-          <Link href="/vendors"
+          <Link href="/vendor/list"
             className="bg-blue-600 text-white rounded-xl p-4 text-center hover:bg-blue-700 transition-colors">
             <TrendingUp className="w-6 h-6 mx-auto mb-1" />
             <p className="text-sm font-medium">View Vendors</p>
+          </Link>
+          <Link href="/marketplace"
+            className="bg-indigo-600 text-white rounded-xl p-4 text-center hover:bg-indigo-700 transition-colors">
+            <Wallet className="w-6 h-6 mx-auto mb-1" />
+            <p className="text-sm font-medium">My Investments</p>
           </Link>
         </div>
       </div>

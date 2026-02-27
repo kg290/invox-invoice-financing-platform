@@ -23,6 +23,7 @@ class User(Base):
     otp_channel = Column(String(20), nullable=True)  # whatsapp, sms, email
     is_verified = Column(Boolean, default=False)
     is_active = Column(Boolean, default=True)
+    vendor_setup_json = Column(Text, nullable=True)  # JSON blob for pending vendor auto-setup data
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
     notifications = relationship("Notification", back_populates="user")
@@ -285,12 +286,18 @@ class MarketplaceListing(Base):
     max_interest_rate = Column(Float, nullable=False, default=15)  # Max interest % vendor can afford
     repayment_period_days = Column(Integer, nullable=False, default=90)  # Days to return money
 
-    listing_status = Column(String(20), nullable=False, default="open")  # open, funded, settled, cancelled, expired
+    listing_status = Column(String(20), nullable=False, default="open")  # open, partially_funded, funded, settled, cancelled, expired
     funded_amount = Column(Float, nullable=True)
-    funded_by = Column(String(255), nullable=True)  # Lender name/id
-    lender_id = Column(Integer, ForeignKey("lenders.id"), nullable=True)
+    funded_by = Column(String(255), nullable=True)  # Lender name/id (legacy single-lender)
+    lender_id = Column(Integer, ForeignKey("lenders.id"), nullable=True)  # legacy single-lender FK
     funded_at = Column(DateTime(timezone=True), nullable=True)
     settlement_date = Column(DateTime(timezone=True), nullable=True)
+
+    # ── Community Pot / Fractional Funding fields ──
+    total_funded_amount = Column(Float, nullable=False, default=0)      # Sum of all fractional investments
+    total_investors = Column(Integer, nullable=False, default=0)         # Count of unique investors
+    min_investment = Column(Float, nullable=False, default=500)          # Minimum investment amount (₹500)
+    funding_mode = Column(String(20), nullable=False, default="fractional")  # "fractional" (crowdfunding)
 
     risk_score = Column(Float, nullable=True)  # AI risk score at time of listing
     blockchain_hash = Column(String(64), nullable=True)
@@ -301,6 +308,7 @@ class MarketplaceListing(Base):
 
     invoice = relationship("Invoice", back_populates="marketplace_listing")
     lender = relationship("Lender", back_populates="funded_listings")
+    fractional_investments = relationship("FractionalInvestment", back_populates="listing", order_by="FractionalInvestment.invested_at.desc()")
 
 
 # ════════════════════════════════════════════════
@@ -318,6 +326,35 @@ class Lender(Base):
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
     funded_listings = relationship("MarketplaceListing", back_populates="lender")
+    fractional_investments = relationship("FractionalInvestment", back_populates="lender")
+
+
+# ════════════════════════════════════════════════
+#  FRACTIONAL INVESTMENT (Community Pot)
+# ════════════════════════════════════════════════
+class FractionalInvestment(Base):
+    """Tracks each individual investor's slice in a crowdfunded invoice listing."""
+    __tablename__ = "fractional_investments"
+
+    id = Column(Integer, primary_key=True, index=True, autoincrement=True)
+    listing_id = Column(Integer, ForeignKey("marketplace_listings.id"), nullable=False)
+    lender_id = Column(Integer, ForeignKey("lenders.id"), nullable=False)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=True)
+
+    invested_amount = Column(Float, nullable=False)                      # Amount this investor funded
+    offered_interest_rate = Column(Float, nullable=False)                # Rate offered by this investor
+    ownership_percentage = Column(Float, nullable=False)                 # % of total requested amount
+    expected_return = Column(Float, nullable=True)                       # Calculated expected interest
+
+    payment_id = Column(String(100), nullable=True)                      # InvoX Pay payment ID
+    blockchain_hash = Column(String(64), nullable=True)                  # Blockchain block hash
+
+    status = Column(String(20), nullable=False, default="active")        # active, settled, refunded
+    invested_at = Column(DateTime(timezone=True), server_default=func.now())
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+    listing = relationship("MarketplaceListing", back_populates="fractional_investments")
+    lender = relationship("Lender", back_populates="fractional_investments")
 
 
 # ════════════════════════════════════════════════
@@ -564,4 +601,88 @@ class EMandateExecution(Base):
     bank_response_json = Column(Text, nullable=True)
 
     executed_at = Column(DateTime(timezone=True), server_default=func.now())
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+
+# ════════════════════════════════════════════════
+#  AI AUTONOMOUS NEGOTIATOR — CHAT-BASED
+# ════════════════════════════════════════════════
+class NegotiationSession(Base):
+    __tablename__ = "negotiation_sessions"
+
+    id = Column(Integer, primary_key=True, index=True, autoincrement=True)
+    listing_id = Column(Integer, ForeignKey("marketplace_listings.id"), nullable=False)
+    vendor_id = Column(Integer, ForeignKey("vendors.id"), nullable=False)
+    lender_id = Column(Integer, ForeignKey("lenders.id"), nullable=False)
+    lender_user_id = Column(Integer, ForeignKey("users.id"), nullable=True)
+
+    # Context snapshot
+    invoice_amount = Column(Float, nullable=False)
+    vendor_credit_score = Column(Float, nullable=True)
+    vendor_risk_grade = Column(String(5), nullable=True)
+    fair_market_rate = Column(Float, nullable=True)
+    max_interest_rate = Column(Float, nullable=True)
+    tenure_days = Column(Integer, nullable=True)
+
+    # Negotiation tracking
+    current_round = Column(Integer, default=0)
+    max_rounds = Column(Integer, default=6)
+    status = Column(String(20), default="active")  # active, accepted, rejected, expired
+
+    # Best result
+    final_rate = Column(Float, nullable=True)
+    final_amount = Column(Float, nullable=True)
+    final_score = Column(Float, nullable=True)
+
+    completed_at = Column(DateTime(timezone=True), nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+    messages = relationship("NegotiationMessage", back_populates="session", order_by="NegotiationMessage.created_at")
+
+
+class NegotiationMessage(Base):
+    __tablename__ = "negotiation_messages"
+
+    id = Column(Integer, primary_key=True, index=True, autoincrement=True)
+    session_id = Column(Integer, ForeignKey("negotiation_sessions.id"), nullable=False)
+
+    sender = Column(String(20), nullable=False)        # "lender", "ai_agent", "system"
+    message = Column(Text, nullable=False)
+    message_type = Column(String(20), nullable=False)   # "offer", "counter", "accept", "reject", "info", "welcome"
+
+    # Offer details (when message contains an offer)
+    offered_rate = Column(Float, nullable=True)
+    offered_amount = Column(Float, nullable=True)
+    funding_percentage = Column(Float, nullable=True)
+    offer_score = Column(Float, nullable=True)
+
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+    session = relationship("NegotiationSession", back_populates="messages")
+
+
+class NegotiationRound(Base):
+    __tablename__ = "negotiation_rounds"
+
+    id = Column(Integer, primary_key=True, index=True, autoincrement=True)
+    session_id = Column(Integer, ForeignKey("negotiation_sessions.id"), nullable=False)
+    round_number = Column(Integer, nullable=False)
+
+    # Lender info
+    lender_id = Column(Integer, ForeignKey("lenders.id"), nullable=False)
+    lender_name = Column(String(255), nullable=True)
+    lender_type = Column(String(50), nullable=True)
+    lender_organization = Column(String(255), nullable=True)
+
+    # Conversation
+    agent_message = Column(Text, nullable=True)
+    lender_message = Column(Text, nullable=True)
+
+    # Offer details
+    offered_rate = Column(Float, nullable=False)
+    offered_amount = Column(Float, nullable=True)
+    funding_percentage = Column(Float, nullable=True)
+    is_willing = Column(Boolean, default=True)
+    offer_score = Column(Float, nullable=True)
+
     created_at = Column(DateTime(timezone=True), server_default=func.now())

@@ -18,7 +18,7 @@ import random
 import json
 
 from database import get_db
-from models import User, Vendor, Lender, Notification, ActivityLog
+from models import User, Vendor, Lender, Notification, ActivityLog, VerificationCheck
 from services.email_service import email_service
 
 router = APIRouter(prefix="/api/auth", tags=["auth"])
@@ -48,11 +48,15 @@ class RegisterRequest(BaseModel):
     email: str = Field(..., min_length=5, max_length=200)
     phone: str = Field(..., min_length=10, max_length=15)
     password: str = Field(..., min_length=6, max_length=100)
-    role: str = Field(..., pattern="^(vendor|lender)$")
+    role: str = Field(..., pattern="^(vendor|lender|admin)$")
     otp_channel: str = Field(default="email", pattern="^(whatsapp|sms|email)$")
     # Lender extra fields
     organization: Optional[str] = None
     lender_type: Optional[str] = Field(default="individual")
+    # Vendor auto-setup fields (for auto KYC + vendor creation on OTP verify)
+    pan_number: Optional[str] = None
+    aadhaar_number: Optional[str] = None
+    gstin: Optional[str] = None
 
 
 class LoginRequest(BaseModel):
@@ -190,6 +194,176 @@ def log_activity(db: Session, entity_type: str, entity_id: int, action: str, des
 
 
 # ═══════════════════════════════════════════════
+#  AUTO VENDOR SETUP (runs during OTP verify)
+# ═══════════════════════════════════════════════
+
+# Vendor setup data is now stored in User.vendor_setup_json (survives server restarts)
+
+
+def _auto_create_vendor(db: Session, user: User, setup_data: dict) -> Optional[int]:
+    """
+    Auto-create a vendor profile from registration data using Sandbox.co.in APIs.
+    Runs automatically after OTP verification.
+    Returns vendor.id on success, None on failure.
+    """
+    try:
+        from services.sandbox_client import search_gstin, verify_pan
+        from services.govt_verification import run_govt_verification
+        from routes.vendor import calculate_risk_score
+
+        name_input = setup_data["full_name"].strip()
+        pan_upper = setup_data["personal_pan"].strip().upper()
+        aadhaar_input = setup_data["personal_aadhaar"].strip()
+        gstin_upper = setup_data["gstin"].strip().upper()
+
+        # Validate Aadhaar format
+        if len(aadhaar_input) != 12 or not aadhaar_input.isdigit() or aadhaar_input[0] == "0":
+            return None
+
+        # Cross-check PAN / GSTIN linkage
+        gstin_pan = gstin_upper[2:12] if len(gstin_upper) >= 12 else ""
+        if gstin_pan and gstin_pan != pan_upper:
+            return None
+
+        # Verify GSTIN via Sandbox.co.in GST Search API
+        gst_result = search_gstin(gstin_upper)
+        if not gst_result["success"]:
+            return None
+        gst_data = gst_result["data"]
+
+        if gst_data.get("status", "").lower() not in ("active",):
+            return None
+
+        # Verify PAN via Sandbox.co.in (graceful if credits exhausted)
+        verify_pan(pan_upper, name=name_input.upper())
+
+        # Duplicate checks
+        if db.query(Vendor).filter(Vendor.gstin == gstin_upper).first():
+            return None
+        if db.query(Vendor).filter(Vendor.personal_pan == pan_upper).first():
+            return None
+        # Generate unique vendor phone (Vendor model has unique constraint)
+        vendor_phone = user.phone or "0000000000"
+        if db.query(Vendor).filter(Vendor.phone == vendor_phone).first():
+            # Phone already in use — use a derived unique phone
+            vendor_phone = f"9{str(user.id).zfill(9)}"
+
+        # Auto-fill from Sandbox GST data
+        legal_name = gst_data.get("legal_name", name_input)
+        trade_name = gst_data.get("trade_name", "") or legal_name
+        business_type = gst_data.get("business_type", "Proprietorship")
+        gst_address = gst_data.get("address", "")
+        gst_state = gst_data.get("state", "")
+        gst_reg_date = gst_data.get("registration_date", "")
+        gst_compliance = gst_data.get("compliance_rating", "Regular")
+        gst_filing_freq = gst_data.get("filing_frequency", "Quarterly")
+
+        addr_parts = gst_address.split(", ") if gst_address else []
+        gst_pincode = addr_parts[-1] if addr_parts and addr_parts[-1].isdigit() else "000000"
+        gst_city = addr_parts[-3] if len(addr_parts) >= 3 else (addr_parts[0] if addr_parts else "")
+
+        gst_reg_date_fmt = "2020-01-01"
+        year_of_establishment = 2020
+        if gst_reg_date:
+            try:
+                dt = datetime.strptime(gst_reg_date, "%d/%m/%Y")
+                gst_reg_date_fmt = dt.strftime("%Y-%m-%d")
+                year_of_establishment = dt.year
+            except (ValueError, TypeError):
+                pass
+
+        biz_category = "General Trading"
+        nob = gst_data.get("nature_of_business", [])
+        if isinstance(nob, list) and nob:
+            biz_category = nob[0] if isinstance(nob[0], str) else "General Trading"
+
+        vendor_data = {
+            "full_name": name_input,
+            "date_of_birth": "2000-01-01",
+            "phone": vendor_phone,
+            "email": user.email,
+            "personal_pan": pan_upper,
+            "personal_aadhaar": aadhaar_input,
+            "address": gst_address or "Address pending verification",
+            "city": gst_city or "N/A",
+            "state": gst_state or "N/A",
+            "pincode": gst_pincode if len(gst_pincode) == 6 else "000000",
+            "business_name": trade_name or f"{name_input} Enterprises",
+            "business_type": business_type or "Proprietorship",
+            "business_category": biz_category,
+            "business_registration_number": "",
+            "udyam_registration_number": "",
+            "year_of_establishment": year_of_establishment,
+            "number_of_employees": 1,
+            "business_address": gst_address or "Address pending verification",
+            "business_city": gst_city or "N/A",
+            "business_state": gst_state or "N/A",
+            "business_pincode": gst_pincode if len(gst_pincode) == 6 else "000000",
+            "gstin": gstin_upper,
+            "gst_registration_date": gst_reg_date_fmt,
+            "gst_filing_frequency": gst_filing_freq,
+            "total_gst_filings": 0,
+            "gst_compliance_status": gst_compliance,
+            "cibil_score": 650,
+            "annual_turnover": 500000,
+            "monthly_revenue": 0,
+            "business_assets_value": 100000,
+            "existing_liabilities": 0,
+            "bank_account_number": "00000000000",
+            "bank_name": "Pending verification",
+            "bank_ifsc": "XXXX0000000",
+            "bank_branch": "",
+            "nominee_name": "N/A",
+            "nominee_relationship": "Self",
+            "nominee_phone": vendor_phone,
+            "nominee_aadhaar": "",
+        }
+
+        # Run Government Verification Pipeline (hits Sandbox APIs)
+        govt_result = run_govt_verification(vendor_data)
+
+        auto_filled = govt_result.get("auto_filled", {})
+        vendor_data["cibil_score"] = govt_result.get("cibil_score", vendor_data["cibil_score"])
+        if "gst_compliance_status" in auto_filled:
+            vendor_data["gst_compliance_status"] = auto_filled["gst_compliance_status"]
+        if "total_gst_filings" in auto_filled:
+            vendor_data["total_gst_filings"] = auto_filled["total_gst_filings"]
+
+        # Calculate risk score with real Sandbox data
+        risk_score = calculate_risk_score(vendor_data)
+        vendor_data["risk_score"] = risk_score
+
+        # Set profile status based on verification
+        if govt_result["overall_status"] == "verified":
+            vendor_data["profile_status"] = "verified"
+            vendor_data["verification_notes"] = "All government checks passed. Auto-verified during registration."
+        else:
+            vendor_data["profile_status"] = "pending"
+            vendor_data["verification_notes"] = "Auto-setup during registration. Some checks may need review."
+
+        db_vendor = Vendor(**vendor_data)
+        db.add(db_vendor)
+        db.flush()
+
+        # Save verification checks
+        for check in govt_result["checks"]:
+            vc = VerificationCheck(
+                vendor_id=db_vendor.id,
+                check_type=check["check"],
+                status=check["status"],
+                details=json.dumps(check),
+            )
+            db.add(vc)
+
+        return db_vendor.id
+
+    except Exception as exc:
+        import traceback
+        traceback.print_exc()
+        return None
+
+
+# ═══════════════════════════════════════════════
 #  REGISTER
 # ═══════════════════════════════════════════════
 
@@ -228,8 +402,24 @@ def register(data: RegisterRequest, db: Session = Depends(get_db)):
         db.flush()  # Get lender.id
         user.lender_id = lender.id
 
+    # For vendors, store setup data for auto-create after OTP verification
+    vendor_setup = None
+    if data.role == "vendor" and data.pan_number and data.aadhaar_number and data.gstin:
+        vendor_setup = json.dumps({
+            "full_name": data.name,
+            "personal_pan": data.pan_number.strip().upper(),
+            "personal_aadhaar": data.aadhaar_number.strip(),
+            "gstin": data.gstin.strip().upper(),
+        })
+
     db.add(user)
     db.flush()
+
+    # Set vendor setup JSON after user is in session
+    if vendor_setup:
+        user.vendor_setup_json = vendor_setup
+        db.flush()
+        print(f"  📦 Stored vendor setup in DB for {data.email} (user {user.id})")
 
     # Generate & send OTP
     otp = generate_otp()
@@ -358,11 +548,26 @@ def verify_otp(data: VerifyOTPRequest, db: Session = Depends(get_db)):
     user.otp_expires_at = None
     user.is_verified = True
 
-    # Auto-link vendor/lender if not already linked (handles users created before auto-link was added)
+    # Auto-link vendor/lender if not already linked
     if user.role == "vendor" and user.vendor_id is None:
-        vendor = db.query(Vendor).filter(Vendor.email == user.email).first()
-        if vendor:
-            user.vendor_id = vendor.id
+        # Auto-create from pending registration data (stored in DB)
+        setup_data = None
+        if user.vendor_setup_json:
+            try:
+                setup_data = json.loads(user.vendor_setup_json)
+                user.vendor_setup_json = None  # Consume it
+                print(f"  🔍 Found vendor setup data in DB for {user.email}: {setup_data}")
+            except (json.JSONDecodeError, TypeError):
+                pass
+        if setup_data:
+            vendor_id = _auto_create_vendor(db, user, setup_data)
+            if vendor_id:
+                user.vendor_id = vendor_id
+        else:
+            # Fallback: link existing vendor by email
+            vendor = db.query(Vendor).filter(Vendor.email == user.email).first()
+            if vendor:
+                user.vendor_id = vendor.id
     elif user.role == "lender" and user.lender_id is None:
         lender = db.query(Lender).filter(Lender.email == user.email).first()
         if lender:
@@ -458,6 +663,31 @@ def resend_otp(data: LoginRequest, db: Session = Depends(get_db)):
 
     return {
         "message": f"OTP resent via {data.otp_channel}",
+        "debug_otp": otp,
+    }
+
+
+class ResendOTPByEmail(BaseModel):
+    email: str
+
+
+@router.post("/resend-otp-email")
+def resend_otp_by_email(data: ResendOTPByEmail, db: Session = Depends(get_db)):
+    """Resend OTP using just the email — no password needed. For verify-otp page."""
+    user = db.query(User).filter(User.email == data.email).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    otp = generate_otp()
+    user.otp_code = otp
+    user.otp_expires_at = datetime.now(timezone.utc) + timedelta(minutes=OTP_EXPIRE_MINUTES)
+    channel = user.otp_channel or "email"
+
+    send_otp(user.phone or "", user.email, otp, channel, user_name=user.name)
+    db.commit()
+
+    return {
+        "message": f"OTP resent via {channel}",
         "debug_otp": otp,
     }
 

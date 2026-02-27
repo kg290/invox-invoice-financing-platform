@@ -7,7 +7,6 @@ import {
   FileText,
   Search,
   ChevronRight,
-  Shield,
   CheckCircle2,
   Clock,
   AlertTriangle,
@@ -107,11 +106,11 @@ export default function VendorList() {
         </div>
 
         {loading ? (
-          <div className="flex items-center justify-center py-20">
+          <div className="flex items-center justify-center py-12">
             <Loader2 className="w-8 h-8 animate-spin text-blue-600" />
           </div>
         ) : filtered.length === 0 ? (
-          <div className="text-center py-20">
+          <div className="text-center py-12">
             <Users className="w-12 h-12 text-gray-300 mx-auto mb-4" />
             <p className="text-gray-500">
               {search ? "No vendors match your search" : "No vendors registered yet"}

@@ -4,7 +4,7 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { toast } from "sonner";
-import { FileText, Mail, Lock, Loader2, Eye, EyeOff, Smartphone, MessageCircle, Zap, UserCircle, Landmark } from "lucide-react";
+import { FileText, Mail, Lock, Loader2, Eye, EyeOff, Smartphone, MessageCircle, Zap, UserCircle, Landmark, ShieldCheck } from "lucide-react";
 import api, { getErrorMessage } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 
@@ -13,6 +13,7 @@ const DEMO_ACCOUNTS = [
   { role: "Vendor 2", email: "vendor2@invox.demo", password: "Demo@1234", icon: UserCircle, desc: "Ramu — Furniture Works", activeBg: "bg-blue-50 border-blue-300", iconColor: "text-blue-600", badgeCls: "bg-blue-100 text-blue-700" },
   { role: "Vendor 3", email: "vendor3@invox.demo", password: "Demo@1234", icon: UserCircle, desc: "Fatima — Khan Masala & Spices", activeBg: "bg-emerald-50 border-emerald-300", iconColor: "text-emerald-600", badgeCls: "bg-emerald-100 text-emerald-700" },
   { role: "Lender", email: "lender@invox.demo", password: "Demo@1234", icon: Landmark, desc: "Deepak — JanSeva Microfinance", activeBg: "bg-purple-50 border-purple-300", iconColor: "text-purple-600", badgeCls: "bg-purple-100 text-purple-700" },
+  { role: "Admin", email: "admin@invox.demo", password: "Demo@1234", icon: ShieldCheck, desc: "Platform Admin", activeBg: "bg-red-50 border-red-300", iconColor: "text-red-600", badgeCls: "bg-red-100 text-red-700" },
 ];
 
 export default function LoginPage() {
@@ -43,6 +44,8 @@ export default function LoginPage() {
           router.push(`/vendor/${u.vendor_id}/dashboard`);
         } else if (u.role === "lender" && u.lender_id) {
           router.push(`/lender/${u.lender_id}/dashboard`);
+        } else if (u.role === "admin") {
+          router.push("/admin/dashboard");
         } else {
           router.push("/");
         }

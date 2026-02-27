@@ -75,9 +75,9 @@ export default function InvoiceListPage() {
         </div>
 
         {loading ? (
-          <div className="flex justify-center py-20"><Loader2 className="w-8 h-8 animate-spin text-blue-600" /></div>
+          <div className="flex justify-center py-12"><Loader2 className="w-8 h-8 animate-spin text-blue-600" /></div>
         ) : filtered.length === 0 ? (
-          <div className="text-center py-20">
+          <div className="text-center py-12">
             <FileText className="w-12 h-12 text-gray-300 mx-auto mb-3" />
             <p className="text-gray-500 text-sm">No invoices found.</p>
             <Link href={`/vendor/${vendorId}/invoices/create`} className="text-blue-600 text-sm hover:underline mt-2 inline-block">
