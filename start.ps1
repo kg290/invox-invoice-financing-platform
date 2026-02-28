@@ -6,7 +6,12 @@
 $BACKEND_DIR = "d:\Hackathon\InnovateYou\backend"
 $BOT_DIR     = "d:\Hackathon\InnovateYou\telegram-bot-package\bot"
 $PYTHON      = "d:\Hackathon\InnovateYou\backend\venv\Scripts\python.exe"
-$BOT_TOKEN   = "8705153678:AAHGrFHCkPM1jFWuJlGQRugU1Leo8g2FOa4"
+$BOT_TOKEN   = $env:TELEGRAM_BOT_TOKEN
+if (-Not $BOT_TOKEN) {
+    Write-Host "ERROR: TELEGRAM_BOT_TOKEN env var is not set." -ForegroundColor Red
+    Write-Host "Set it first:  `$env:TELEGRAM_BOT_TOKEN='your-token-here'"
+    exit 1
+}
 $BACKEND_URL = "http://localhost:8000"
 
 Write-Host ""

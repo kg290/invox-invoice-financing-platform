@@ -1,9 +1,12 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, BackgroundTasks
 from fastapi.responses import Response
 from sqlalchemy.orm import Session
 from typing import List, Optional
 from pydantic import BaseModel, Field
 from datetime import datetime
+import hashlib
+import os
+import uuid
 
 from database import get_db
 from models import Invoice, InvoiceItem, Vendor, User
@@ -126,6 +129,10 @@ class InvoiceResponse(BaseModel):
     blockchain_hash: Optional[str]
     block_index: Optional[int]
     is_listed: bool
+    ocr_status: Optional[str] = None
+    ocr_confidence: Optional[float] = None
+    ocr_warnings: Optional[str] = None
+    source: Optional[str] = None
     items: List[InvoiceItemResponse] = []
 
     class Config:
@@ -144,6 +151,8 @@ class InvoiceListResponse(BaseModel):
     payment_status: str
     is_listed: bool
     blockchain_hash: Optional[str]
+    ocr_status: Optional[str] = None
+    source: Optional[str] = None
 
     class Config:
         from_attributes = True
@@ -305,6 +314,109 @@ def create_invoice(vendor_id: int, data: InvoiceCreate, db: Session = Depends(ge
     db.commit()
     db.refresh(invoice)
     return invoice
+
+
+# ═══════════════════════════════════════════════
+#  OCR UPLOAD — Only way to create invoices for marketplace
+# ═══════════════════════════════════════════════
+
+@router.post("/ocr-upload/{vendor_id}", status_code=201)
+def upload_invoice_ocr(
+    vendor_id: int,
+    background_tasks: BackgroundTasks,
+    file: UploadFile = File(...),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Upload an invoice image/PDF for OCR processing. This is the ONLY way to create marketplace-listable invoices."""
+    vendor = db.query(Vendor).filter(Vendor.id == vendor_id).first()
+    if not vendor:
+        raise HTTPException(status_code=404, detail="Vendor not found")
+
+    # Vendor ownership check
+    if current_user.role == "vendor" and current_user.vendor_id != vendor_id:
+        raise HTTPException(status_code=403, detail="You can only upload invoices for your own account")
+
+    # Validate file type
+    allowed_types = ["image/jpeg", "image/png", "image/jpg", "image/webp", "application/pdf"]
+    if file.content_type not in allowed_types:
+        raise HTTPException(status_code=400, detail=f"Invalid file type. Allowed: JPEG, PNG, WebP, PDF")
+
+    # Read file bytes
+    file_bytes = file.file.read()
+    if len(file_bytes) < 100:
+        raise HTTPException(status_code=400, detail="File is too small or empty")
+    if len(file_bytes) > 15 * 1024 * 1024:  # 15MB limit
+        raise HTTPException(status_code=400, detail="File too large. Max 15MB.")
+
+    # ── Duplicate detection: compute file hash ──
+    file_hash = hashlib.sha256(file_bytes).hexdigest()
+    existing = db.query(Invoice).filter(
+        Invoice.file_hash == file_hash,
+        Invoice.vendor_id == vendor_id,
+    ).first()
+    if existing:
+        raise HTTPException(
+            status_code=409,
+            detail=f"This exact invoice file has already been uploaded (Invoice #{existing.invoice_number}). Duplicate uploads are not allowed to prevent fraud."
+        )
+
+    # Also check across all vendors for same file
+    existing_any = db.query(Invoice).filter(Invoice.file_hash == file_hash).first()
+    if existing_any:
+        raise HTTPException(
+            status_code=409,
+            detail=f"This exact invoice file has already been uploaded by another vendor. Same invoice cannot be listed twice."
+        )
+
+    # Save file
+    upload_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), "uploads")
+    os.makedirs(upload_dir, exist_ok=True)
+    ext = os.path.splitext(file.filename or "invoice.jpg")[1] or ".jpg"
+    safe_name = f"inv_{vendor_id}_{uuid.uuid4().hex[:12]}{ext}"
+    abs_path = os.path.join(upload_dir, safe_name)
+    with open(abs_path, "wb") as f:
+        f.write(file_bytes)
+
+    # Create draft invoice
+    invoice_number = _generate_invoice_number(db, vendor_id)
+    new_inv = Invoice(
+        vendor_id=vendor_id,
+        invoice_number=invoice_number,
+        invoice_date=datetime.now().strftime("%Y-%m-%d"),
+        due_date=datetime.now().strftime("%Y-%m-%d"),
+        supply_type="intra_state",
+        place_of_supply=vendor.state or "Unknown",
+        place_of_supply_code="00",
+        reverse_charge=False,
+        buyer_name="Pending OCR...",
+        buyer_address="Pending OCR...",
+        buyer_city="Pending",
+        buyer_state=vendor.state or "Unknown",
+        buyer_state_code="00",
+        buyer_pincode="000000",
+        invoice_status="draft",
+        payment_status="unpaid",
+        file_path=f"/uploads/{safe_name}",
+        file_hash=file_hash,
+        ocr_status="processing",
+        source="ocr_upload",
+    )
+    db.add(new_inv)
+    db.commit()
+    db.refresh(new_inv)
+
+    # Trigger OCR in background
+    from services.ocr_service import run_ocr_and_update
+    background_tasks.add_task(run_ocr_and_update, new_inv.id, abs_path)
+
+    return {
+        "message": "Invoice uploaded! OCR processing started.",
+        "invoice_id": new_inv.id,
+        "invoice_number": new_inv.invoice_number,
+        "file_hash": file_hash,
+        "ocr_status": "processing",
+    }
 
 
 @router.get("/vendor/{vendor_id}", response_model=List[InvoiceListResponse])

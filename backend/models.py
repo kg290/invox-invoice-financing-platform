@@ -171,9 +171,15 @@ class Vendor(Base):
     nominee_aadhaar = Column(String(12), nullable=True)
 
     # ── System Fields ──
-    profile_status = Column(String(20), nullable=False, default="pending")  # pending, verified, rejected
+    profile_status = Column(String(20), nullable=False, default="pending")  # pending, verified, rejected, suspended, blacklisted
     verification_notes = Column(Text, nullable=True)
     risk_score = Column(Float, nullable=True)
+    blacklisted = Column(Boolean, nullable=False, default=False)
+    blacklisted_at = Column(DateTime(timezone=True), nullable=True)
+    blacklist_reason = Column(Text, nullable=True)
+    penalty_amount = Column(Float, nullable=False, default=0.0)
+    penalty_reason = Column(Text, nullable=True)
+    total_defaults = Column(Integer, nullable=False, default=0)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
 
@@ -253,11 +259,12 @@ class Invoice(Base):
 
     # ── OCR / Telegram Upload ──
     file_path = Column(String(500), nullable=True)
+    file_hash = Column(String(64), nullable=True, index=True)  # SHA-256 of uploaded file for duplicate detection
     ocr_status = Column(String(20), nullable=True)  # processing, ocr_done, failed
     ocr_confidence = Column(Float, nullable=True)
     ocr_raw_text = Column(Text, nullable=True)
     ocr_warnings = Column(Text, nullable=True)
-    source = Column(String(20), nullable=True)  # web, telegram
+    source = Column(String(20), nullable=True)  # web, telegram, ocr_upload
 
     # ── System ──
     created_at = Column(DateTime(timezone=True), server_default=func.now())
@@ -395,6 +402,36 @@ class FractionalInvestment(Base):
 
     listing = relationship("MarketplaceListing", back_populates="fractional_investments")
     lender = relationship("Lender", back_populates="fractional_investments")
+
+
+# ════════════════════════════════════════════════
+#  TIME-LOCK RELEASE (Anti Hit-and-Run)
+# ════════════════════════════════════════════════
+class TimeLockRelease(Base):
+    """
+    Staged fund release schedule — prevents hit-and-run by releasing money
+    in tranches over time instead of all at once.
+    Day 0:  50% released immediately after funding
+    Day 7:  20% released
+    Day 14: 15% released
+    Day 30: 15% released (final)
+    """
+    __tablename__ = "time_lock_releases"
+
+    id = Column(Integer, primary_key=True, index=True, autoincrement=True)
+    listing_id = Column(Integer, ForeignKey("marketplace_listings.id"), nullable=False)
+    vendor_id = Column(Integer, ForeignKey("vendors.id"), nullable=False)
+
+    tranche_number = Column(Integer, nullable=False)         # 1, 2, 3, 4
+    release_day = Column(Integer, nullable=False)            # 0, 7, 14, 30
+    release_date = Column(String(10), nullable=False)        # YYYY-MM-DD when eligible
+    release_percentage = Column(Float, nullable=False)       # 50, 20, 15, 15
+    release_amount = Column(Float, nullable=False)           # Actual ₹ amount
+    status = Column(String(20), nullable=False, default="locked")  # locked, released, pending
+    released_at = Column(DateTime(timezone=True), nullable=True)
+    blockchain_hash = Column(String(64), nullable=True)
+
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
 
 
 # ════════════════════════════════════════════════

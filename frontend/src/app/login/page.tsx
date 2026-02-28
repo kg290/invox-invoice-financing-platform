@@ -9,10 +9,10 @@ import api, { getErrorMessage } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 
 const DEMO_ACCOUNTS = [
-  { role: "Vendor 1", email: "vendor1@invox.demo", password: "Demo@1234", icon: UserCircle, desc: "Sunita — Maa Annapurna Tiffin", activeBg: "bg-amber-50 border-amber-300", iconColor: "text-amber-600", badgeCls: "bg-amber-100 text-amber-700" },
-  { role: "Vendor 2", email: "vendor2@invox.demo", password: "Demo@1234", icon: UserCircle, desc: "Ramu — Furniture Works", activeBg: "bg-blue-50 border-blue-300", iconColor: "text-blue-600", badgeCls: "bg-blue-100 text-blue-700" },
-  { role: "Vendor 3", email: "vendor3@invox.demo", password: "Demo@1234", icon: UserCircle, desc: "Fatima — Khan Masala & Spices", activeBg: "bg-emerald-50 border-emerald-300", iconColor: "text-emerald-600", badgeCls: "bg-emerald-100 text-emerald-700" },
-  { role: "Lender", email: "lender@invox.demo", password: "Demo@1234", icon: Landmark, desc: "Deepak — JanSeva Microfinance", activeBg: "bg-purple-50 border-purple-300", iconColor: "text-purple-600", badgeCls: "bg-purple-100 text-purple-700" },
+  { role: "Vendor 1", email: "vendor1@invox.demo", password: "Demo@1234", icon: UserCircle, desc: "Lakshmi — Sahu Handloom & Banarasi Sarees", activeBg: "bg-amber-50 border-amber-300", iconColor: "text-amber-600", badgeCls: "bg-amber-100 text-amber-700" },
+  { role: "Vendor 2", email: "vendor2@invox.demo", password: "Demo@1234", icon: UserCircle, desc: "Rajesh — Patil Agro Foods", activeBg: "bg-blue-50 border-blue-300", iconColor: "text-blue-600", badgeCls: "bg-blue-100 text-blue-700" },
+  { role: "Vendor 3", email: "vendor3@invox.demo", password: "Demo@1234", icon: UserCircle, desc: "Irfan — Qureshi Leather Craft", activeBg: "bg-emerald-50 border-emerald-300", iconColor: "text-emerald-600", badgeCls: "bg-emerald-100 text-emerald-700" },
+  { role: "Lender", email: "lender1@invox.demo", password: "Demo@1234", icon: Landmark, desc: "Ramesh — SIDBI Micro Finance Partner", activeBg: "bg-purple-50 border-purple-300", iconColor: "text-purple-600", badgeCls: "bg-purple-100 text-purple-700" },
   { role: "Admin", email: "admin@invox.demo", password: "Demo@1234", icon: ShieldCheck, desc: "Platform Admin", activeBg: "bg-red-50 border-red-300", iconColor: "text-red-600", badgeCls: "bg-red-100 text-red-700" },
 ];
 

@@ -12,7 +12,12 @@
 $ErrorActionPreference = "Stop"
 
 # ── Config ──
-$TELEGRAM_BOT_TOKEN = "8705153678:AAHGrFHCkPM1jFWuJlGQRugU1Leo8g2FOa4"
+$TELEGRAM_BOT_TOKEN = $env:TELEGRAM_BOT_TOKEN
+if (-Not $TELEGRAM_BOT_TOKEN) {
+    Write-Host "ERROR: TELEGRAM_BOT_TOKEN env var is not set." -ForegroundColor Red
+    Write-Host "Set it first:  `$env:TELEGRAM_BOT_TOKEN='your-token-here'"
+    exit 1
+}
 $BACKEND_PORT       = 8000
 $BACKEND_URL        = "http://localhost:$BACKEND_PORT"
 

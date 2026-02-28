@@ -7,7 +7,7 @@ import { toast } from "sonner";
 import {
   FileText, Loader2, Users, Building2, IndianRupee, AlertTriangle,
   CheckCircle, Clock, Store, Receipt, TrendingUp, Shield, Activity,
-  ChevronDown, ChevronUp, AlertCircle, Bell,
+  ChevronDown, ChevronUp, AlertCircle, Bell, Ban, Snowflake, Send, Gavel, RotateCcw,
 } from "lucide-react";
 import api, { getErrorMessage } from "@/lib/api";
 
@@ -30,6 +30,9 @@ interface VendorRow {
   cibil_score: number | null;
   total_owed: number;
   overdue_installments: number;
+  blacklisted: boolean;
+  penalty_amount: number;
+  total_defaults: number;
 }
 
 interface DefaultEntry {
@@ -39,6 +42,10 @@ interface DefaultEntry {
   phone: string;
   email: string;
   risk_score: number | null;
+  profile_status: string;
+  blacklisted: boolean;
+  penalty_amount: number;
+  total_defaults: number;
   overdue_amount: number;
   overdue_installments: { id: number; listing_id: number; installment_number: number; due_date: string; total_amount: number }[];
 }
@@ -52,6 +59,15 @@ export default function AdminDashboard() {
   const [defaults, setDefaults] = useState<DefaultEntry[]>([]);
   const [loading, setLoading] = useState(true);
   const [actionLoading, setActionLoading] = useState<number | null>(null);
+
+  // Penalty modal state
+  const [penaltyModal, setPenaltyModal] = useState<{ vendorId: number; vendorName: string } | null>(null);
+  const [penaltyAmount, setPenaltyAmount] = useState("");
+  const [penaltyNote, setPenaltyNote] = useState("");
+
+  // Notice modal state
+  const [noticeModal, setNoticeModal] = useState<{ vendorId: number; vendorName: string } | null>(null);
+  const [noticeText, setNoticeText] = useState("");
 
   const fetchData = async () => {
     setLoading(true);
@@ -74,16 +90,36 @@ export default function AdminDashboard() {
     fetchData();
   }, []);
 
-  const handleAction = async (vendorId: number, action: string, note?: string) => {
+  const handleAction = async (vendorId: number, action: string, note?: string, penalty_amount?: number) => {
     setActionLoading(vendorId);
     try {
-      const r = await api.post(`/admin/vendor/${vendorId}/action`, { action, note: note || "" });
+      const payload: Record<string, unknown> = { action, note: note || "" };
+      if (penalty_amount !== undefined) payload.penalty_amount = penalty_amount;
+      const r = await api.post(`/admin/vendor/${vendorId}/action`, payload);
       toast.success(r.data.message);
       fetchData();
     } catch (err) {
       toast.error(getErrorMessage(err, "Action failed"));
     }
     setActionLoading(null);
+  };
+
+  const submitPenalty = async () => {
+    if (!penaltyModal) return;
+    const amt = parseFloat(penaltyAmount);
+    if (isNaN(amt) || amt <= 0) { toast.error("Enter a valid penalty amount"); return; }
+    await handleAction(penaltyModal.vendorId, "impose_penalty", penaltyNote || "Late payment penalty", amt);
+    setPenaltyModal(null);
+    setPenaltyAmount("");
+    setPenaltyNote("");
+  };
+
+  const submitNotice = async () => {
+    if (!noticeModal) return;
+    if (!noticeText.trim()) { toast.error("Enter notice content"); return; }
+    await handleAction(noticeModal.vendorId, "send_notice", noticeText);
+    setNoticeModal(null);
+    setNoticeText("");
   };
 
   const tabs: { key: Tab; label: string; icon: typeof Users }[] = [
@@ -273,15 +309,23 @@ export default function AdminDashboard() {
                           <td className="px-4 py-3.5 text-gray-600 font-mono text-[10px]">{v.gstin}</td>
                           <td className="px-4 py-3.5 text-center">
                             <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-lg text-[10px] font-semibold ${
+                              v.blacklisted ? "bg-gray-900 text-white" :
                               v.profile_status === "verified" ? "bg-emerald-50 text-emerald-700" :
                               v.profile_status === "suspended" ? "bg-red-50 text-red-700" :
+                              v.profile_status === "blacklisted" ? "bg-gray-900 text-white" :
                               "bg-yellow-50 text-yellow-700"
                             }`}>
-                              {v.profile_status === "verified" ? <CheckCircle className="w-3 h-3" /> :
+                              {v.blacklisted ? <Ban className="w-3 h-3" /> :
+                               v.profile_status === "verified" ? <CheckCircle className="w-3 h-3" /> :
                                v.profile_status === "suspended" ? <AlertCircle className="w-3 h-3" /> :
                                <Clock className="w-3 h-3" />}
-                              {v.profile_status}
+                              {v.blacklisted ? "blacklisted" : v.profile_status}
                             </span>
+                            {v.penalty_amount > 0 && (
+                              <span className="ml-1 inline-flex items-center px-1.5 py-0.5 bg-orange-50 text-orange-700 rounded text-[9px] font-bold">
+                                ₹{v.penalty_amount.toLocaleString("en-IN")} penalty
+                              </span>
+                            )}
                           </td>
                           <td className="px-4 py-3.5 text-center font-semibold">{v.cibil_score ?? "—"}</td>
                           <td className="px-4 py-3.5 text-center">
@@ -303,26 +347,40 @@ export default function AdminDashboard() {
                             )}
                           </td>
                           <td className="px-4 py-3.5 text-center">
-                            <div className="flex items-center justify-center gap-1">
-                              {v.profile_status !== "suspended" && v.overdue_installments > 0 && (
+                            <div className="flex items-center justify-center gap-1 flex-wrap">
+                              {!v.blacklisted && v.profile_status !== "suspended" && v.overdue_installments > 0 && (
                                 <button onClick={() => handleAction(v.id, "warn", "Overdue payment reminder")}
                                   disabled={actionLoading === v.id}
                                   className="px-2.5 py-1 bg-amber-50 text-amber-700 rounded-lg text-[10px] font-semibold hover:bg-amber-100 disabled:opacity-50">
                                   Warn
                                 </button>
                               )}
-                              {v.profile_status === "verified" && (
+                              {!v.blacklisted && v.profile_status === "verified" && v.overdue_installments > 0 && (
+                                <button onClick={() => handleAction(v.id, "freeze", "Account frozen — overdue payments")}
+                                  disabled={actionLoading === v.id}
+                                  className="px-2.5 py-1 bg-cyan-50 text-cyan-700 rounded-lg text-[10px] font-semibold hover:bg-cyan-100 disabled:opacity-50">
+                                  <Snowflake className="w-3 h-3 inline mr-0.5" />Freeze
+                                </button>
+                              )}
+                              {!v.blacklisted && v.profile_status === "verified" && (
                                 <button onClick={() => handleAction(v.id, "suspend", "Multiple overdue payments")}
                                   disabled={actionLoading === v.id}
                                   className="px-2.5 py-1 bg-red-50 text-red-700 rounded-lg text-[10px] font-semibold hover:bg-red-100 disabled:opacity-50">
                                   Suspend
                                 </button>
                               )}
-                              {v.profile_status === "suspended" && (
-                                <button onClick={() => handleAction(v.id, "approve", "Reinstated by admin")}
+                              {!v.blacklisted && v.overdue_installments > 0 && (
+                                <button onClick={() => handleAction(v.id, "blacklist", "Blacklisted — repeated defaults")}
+                                  disabled={actionLoading === v.id}
+                                  className="px-2.5 py-1 bg-gray-900 text-white rounded-lg text-[10px] font-semibold hover:bg-gray-800 disabled:opacity-50">
+                                  <Ban className="w-3 h-3 inline mr-0.5" />Blacklist
+                                </button>
+                              )}
+                              {(v.profile_status === "suspended" || v.blacklisted) && (
+                                <button onClick={() => handleAction(v.id, v.blacklisted ? "reinstate" : "approve", "Reinstated by admin")}
                                   disabled={actionLoading === v.id}
                                   className="px-2.5 py-1 bg-emerald-50 text-emerald-700 rounded-lg text-[10px] font-semibold hover:bg-emerald-100 disabled:opacity-50">
-                                  Reinstate
+                                  <RotateCcw className="w-3 h-3 inline mr-0.5" />Reinstate
                                 </button>
                               )}
                             </div>
@@ -354,16 +412,26 @@ export default function AdminDashboard() {
                   </div>
                 ) : (
                   defaults.map((d) => (
-                    <div key={d.vendor_id} className="bg-white rounded-2xl border border-red-100 overflow-hidden">
-                      <div className="p-5 bg-red-50/50">
+                    <div key={d.vendor_id} className={`bg-white rounded-2xl border overflow-hidden ${d.blacklisted ? "border-gray-800" : "border-red-100"}`}>
+                      <div className={`p-5 ${d.blacklisted ? "bg-gray-900/5" : "bg-red-50/50"}`}>
                         <div className="flex items-center justify-between">
                           <div className="flex items-center gap-3">
-                            <div className="w-12 h-12 bg-red-100 rounded-xl flex items-center justify-center">
-                              <AlertTriangle className="w-6 h-6 text-red-600" />
+                            <div className={`w-12 h-12 rounded-xl flex items-center justify-center ${d.blacklisted ? "bg-gray-900" : "bg-red-100"}`}>
+                              {d.blacklisted ? <Ban className="w-6 h-6 text-white" /> : <AlertTriangle className="w-6 h-6 text-red-600" />}
                             </div>
                             <div>
-                              <h3 className="text-sm font-bold text-gray-900">{d.vendor_name}</h3>
+                              <h3 className="text-sm font-bold text-gray-900 flex items-center gap-2">
+                                {d.vendor_name}
+                                {d.blacklisted && <span className="px-1.5 py-0.5 bg-gray-900 text-white text-[9px] rounded font-bold">BLACKLISTED</span>}
+                                {d.profile_status === "suspended" && !d.blacklisted && <span className="px-1.5 py-0.5 bg-red-100 text-red-700 text-[9px] rounded font-bold">SUSPENDED</span>}
+                              </h3>
                               <p className="text-xs text-gray-500">{d.business_name} · {d.phone}</p>
+                              {d.penalty_amount > 0 && (
+                                <p className="text-[10px] text-orange-600 font-semibold mt-0.5">Penalty: ₹{d.penalty_amount.toLocaleString("en-IN")}</p>
+                              )}
+                              {d.total_defaults > 0 && (
+                                <p className="text-[10px] text-gray-500 mt-0.5">Total defaults: {d.total_defaults}</p>
+                              )}
                             </div>
                           </div>
                           <div className="text-right">
@@ -393,18 +461,53 @@ export default function AdminDashboard() {
                             ))}
                           </tbody>
                         </table>
-                        <div className="flex gap-2 mt-4">
-                          <button onClick={() => handleAction(d.vendor_id, "warn", "Overdue payment — urgent reminder")}
+                        <div className="flex gap-2 mt-4 flex-wrap">
+                          {!d.blacklisted && (
+                            <button onClick={() => handleAction(d.vendor_id, "warn", "Overdue payment — urgent reminder")}
+                              disabled={actionLoading === d.vendor_id}
+                              className="px-4 py-2 bg-amber-600 text-white rounded-lg text-xs font-semibold hover:bg-amber-700 disabled:opacity-50">
+                              {actionLoading === d.vendor_id ? <Loader2 className="w-3 h-3 animate-spin inline mr-1" /> : <Bell className="w-3 h-3 inline mr-1" />}
+                              Warn
+                            </button>
+                          )}
+                          <button onClick={() => setNoticeModal({ vendorId: d.vendor_id, vendorName: d.vendor_name })}
                             disabled={actionLoading === d.vendor_id}
-                            className="px-4 py-2 bg-amber-600 text-white rounded-lg text-xs font-semibold hover:bg-amber-700 disabled:opacity-50">
-                            {actionLoading === d.vendor_id ? <Loader2 className="w-3 h-3 animate-spin inline mr-1" /> : null}
-                            Send Warning
+                            className="px-4 py-2 bg-indigo-600 text-white rounded-lg text-xs font-semibold hover:bg-indigo-700 disabled:opacity-50">
+                            <Send className="w-3 h-3 inline mr-1" />Send Notice
                           </button>
-                          <button onClick={() => handleAction(d.vendor_id, "suspend", "Suspended due to overdue payments")}
+                          <button onClick={() => setPenaltyModal({ vendorId: d.vendor_id, vendorName: d.vendor_name })}
                             disabled={actionLoading === d.vendor_id}
-                            className="px-4 py-2 bg-red-600 text-white rounded-lg text-xs font-semibold hover:bg-red-700 disabled:opacity-50">
-                            Suspend Vendor
+                            className="px-4 py-2 bg-orange-600 text-white rounded-lg text-xs font-semibold hover:bg-orange-700 disabled:opacity-50">
+                            <Gavel className="w-3 h-3 inline mr-1" />Impose Penalty
                           </button>
+                          {!d.blacklisted && d.profile_status !== "suspended" && (
+                            <button onClick={() => handleAction(d.vendor_id, "freeze", "Account frozen — overdue defaults")}
+                              disabled={actionLoading === d.vendor_id}
+                              className="px-4 py-2 bg-cyan-600 text-white rounded-lg text-xs font-semibold hover:bg-cyan-700 disabled:opacity-50">
+                              <Snowflake className="w-3 h-3 inline mr-1" />Freeze Account
+                            </button>
+                          )}
+                          {!d.blacklisted && (
+                            <button onClick={() => handleAction(d.vendor_id, "blacklist", "Blacklisted due to persistent defaults")}
+                              disabled={actionLoading === d.vendor_id}
+                              className="px-4 py-2 bg-gray-900 text-white rounded-lg text-xs font-semibold hover:bg-gray-800 disabled:opacity-50">
+                              <Ban className="w-3 h-3 inline mr-1" />Blacklist
+                            </button>
+                          )}
+                          {d.blacklisted && (
+                            <button onClick={() => handleAction(d.vendor_id, "reinstate", "Reinstated after review")}
+                              disabled={actionLoading === d.vendor_id}
+                              className="px-4 py-2 bg-emerald-600 text-white rounded-lg text-xs font-semibold hover:bg-emerald-700 disabled:opacity-50">
+                              <RotateCcw className="w-3 h-3 inline mr-1" />Reinstate
+                            </button>
+                          )}
+                          {!d.blacklisted && d.profile_status === "suspended" && (
+                            <button onClick={() => handleAction(d.vendor_id, "unfreeze", "Account unfrozen")}
+                              disabled={actionLoading === d.vendor_id}
+                              className="px-4 py-2 bg-emerald-600 text-white rounded-lg text-xs font-semibold hover:bg-emerald-700 disabled:opacity-50">
+                              <RotateCcw className="w-3 h-3 inline mr-1" />Unfreeze
+                            </button>
+                          )}
                         </div>
                       </div>
                     </div>
@@ -415,6 +518,72 @@ export default function AdminDashboard() {
           </>
         )}
       </div>
+
+      {/* ── Penalty Modal ── */}
+      {penaltyModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md p-6 mx-4">
+            <h3 className="text-lg font-bold text-gray-900 flex items-center gap-2 mb-4">
+              <Gavel className="w-5 h-5 text-orange-600" /> Impose Penalty
+            </h3>
+            <p className="text-sm text-gray-500 mb-4">Vendor: <strong>{penaltyModal.vendorName}</strong></p>
+            <div className="space-y-3">
+              <div>
+                <label className="text-xs text-gray-500 font-medium">Penalty Amount (₹)</label>
+                <input type="number" value={penaltyAmount} onChange={e => setPenaltyAmount(e.target.value)}
+                  placeholder="e.g. 5000" min="1"
+                  className="w-full mt-1 px-3 py-2 border border-gray-200 rounded-lg text-sm focus:ring-2 focus:ring-orange-500 focus:border-orange-500" />
+              </div>
+              <div>
+                <label className="text-xs text-gray-500 font-medium">Reason (optional)</label>
+                <input type="text" value={penaltyNote} onChange={e => setPenaltyNote(e.target.value)}
+                  placeholder="Late payment penalty"
+                  className="w-full mt-1 px-3 py-2 border border-gray-200 rounded-lg text-sm focus:ring-2 focus:ring-orange-500 focus:border-orange-500" />
+              </div>
+            </div>
+            <div className="flex gap-3 mt-6">
+              <button onClick={() => { setPenaltyModal(null); setPenaltyAmount(""); setPenaltyNote(""); }}
+                className="flex-1 px-4 py-2 border border-gray-200 text-gray-700 rounded-lg text-sm font-medium hover:bg-gray-50">
+                Cancel
+              </button>
+              <button onClick={submitPenalty} disabled={actionLoading !== null}
+                className="flex-1 px-4 py-2 bg-orange-600 text-white rounded-lg text-sm font-semibold hover:bg-orange-700 disabled:opacity-50">
+                {actionLoading ? <Loader2 className="w-4 h-4 animate-spin inline mr-1" /> : null}
+                Impose Penalty
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── Notice Modal ── */}
+      {noticeModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md p-6 mx-4">
+            <h3 className="text-lg font-bold text-gray-900 flex items-center gap-2 mb-4">
+              <Send className="w-5 h-5 text-indigo-600" /> Send Legal / Recovery Notice
+            </h3>
+            <p className="text-sm text-gray-500 mb-4">Vendor: <strong>{noticeModal.vendorName}</strong></p>
+            <div>
+              <label className="text-xs text-gray-500 font-medium">Notice Content</label>
+              <textarea value={noticeText} onChange={e => setNoticeText(e.target.value)} rows={4}
+                placeholder="You are hereby notified of outstanding payment obligations..."
+                className="w-full mt-1 px-3 py-2 border border-gray-200 rounded-lg text-sm focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500" />
+            </div>
+            <div className="flex gap-3 mt-6">
+              <button onClick={() => { setNoticeModal(null); setNoticeText(""); }}
+                className="flex-1 px-4 py-2 border border-gray-200 text-gray-700 rounded-lg text-sm font-medium hover:bg-gray-50">
+                Cancel
+              </button>
+              <button onClick={submitNotice} disabled={actionLoading !== null}
+                className="flex-1 px-4 py-2 bg-indigo-600 text-white rounded-lg text-sm font-semibold hover:bg-indigo-700 disabled:opacity-50">
+                {actionLoading ? <Loader2 className="w-4 h-4 animate-spin inline mr-1" /> : null}
+                Send Notice
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
     </ProtectedRoute>
   );

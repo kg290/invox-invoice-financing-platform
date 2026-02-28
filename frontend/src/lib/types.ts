@@ -626,6 +626,11 @@ export interface LenderDashboardData {
     total_returns: number;
     roi_percent: number;
   };
+  wallet: {
+    balance: number;
+    escrow_locked: number;
+    total_withdrawn: number;
+  };
   available_market: {
     listings_count: number;
     total_value: number;

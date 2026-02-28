@@ -14,6 +14,7 @@ from database import get_db
 from models import (
     Vendor, Invoice, InvoiceItem, Lender, MarketplaceListing,
     VerificationCheck, User, CreditScore, Notification, ActivityLog,
+    RepaymentSchedule, FractionalInvestment,
 )
 from blockchain import add_block
 from datetime import datetime, timezone, timedelta
@@ -997,6 +998,95 @@ def seed_demo_data(db: Session = Depends(get_db)):
         db.add(listing)
         created["invoices"] += 1
         created["listings"] += 1
+
+    db.commit()
+
+    # ── 4b. Simulate FUNDED listings with repayment schedules (for vendors 1-4) ──
+    funded_listings = db.query(MarketplaceListing).filter(
+        MarketplaceListing.vendor_id.in_([v.id for v in vendors[:4]]),
+        MarketplaceListing.listing_status == "open",
+    ).all()
+
+    now = datetime.now(timezone.utc)
+    for idx, fl in enumerate(funded_listings):
+        # Pick a lender to fund the listing
+        funder_lender = lenders[idx % len(lenders)]
+        funded_amt = fl.requested_amount
+        interest_rate = fl.max_interest_rate
+
+        # Update listing to "funded"
+        fl.listing_status = "funded"
+        fl.funded_amount = funded_amt
+        fl.funded_by = funder_lender.name
+        fl.lender_id = funder_lender.id
+        fl.funded_at = now - timedelta(days=60 - idx * 10)
+        fl.total_funded_amount = funded_amt
+        fl.total_investors = 1
+
+        # Create FractionalInvestment record
+        fi = FractionalInvestment(
+            listing_id=fl.id,
+            lender_id=funder_lender.id,
+            invested_amount=funded_amt,
+            offered_interest_rate=interest_rate,
+            ownership_percentage=100.0,
+            expected_return=round(funded_amt * interest_rate / 100 * fl.repayment_period_days / 365, 2),
+            status="active",
+        )
+        db.add(fi)
+
+        # Create 3-installment repayment schedule
+        total_with_interest = round(funded_amt * (1 + interest_rate / 100 * fl.repayment_period_days / 365), 2)
+        per_installment = round(total_with_interest / 3, 2)
+        principal_per = round(funded_amt / 3, 2)
+        interest_per = round(per_installment - principal_per, 2)
+
+        base_date = fl.funded_at
+        for inst_num in range(1, 4):
+            due = base_date + timedelta(days=30 * inst_num)
+            # For vendor 1 (idx 0): installment 1 paid, 2 overdue, 3 pending
+            # For vendor 2 (idx 1): installment 1 paid, 2 pending, 3 pending
+            # For vendor 3 (idx 2): all pending (recently funded)
+            # For vendor 4 (idx 3): installment 1 overdue, 2 pending, 3 pending
+            if idx == 0 and inst_num == 1:
+                status = "paid"
+                paid_date = (due + timedelta(days=2)).strftime("%Y-%m-%d")
+                paid_amount = per_installment
+            elif idx == 0 and inst_num == 2:
+                status = "overdue"
+                paid_date = None
+                paid_amount = None
+            elif idx == 1 and inst_num == 1:
+                status = "paid"
+                paid_date = (due - timedelta(days=1)).strftime("%Y-%m-%d")
+                paid_amount = per_installment
+            elif idx == 3 and inst_num == 1:
+                status = "overdue"
+                paid_date = None
+                paid_amount = None
+            elif due.date() < now.date():
+                status = "overdue"
+                paid_date = None
+                paid_amount = None
+            else:
+                status = "pending"
+                paid_date = None
+                paid_amount = None
+
+            sched = RepaymentSchedule(
+                listing_id=fl.id,
+                installment_number=inst_num,
+                due_date=due.strftime("%Y-%m-%d"),
+                principal_amount=principal_per,
+                interest_amount=interest_per,
+                total_amount=per_installment,
+                status=status,
+                paid_date=paid_date,
+                paid_amount=paid_amount,
+            )
+            db.add(sched)
+
+        created["listings"] += 0  # already counted
 
     db.commit()
 

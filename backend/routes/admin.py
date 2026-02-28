@@ -9,7 +9,7 @@ from datetime import datetime, timezone
 from pydantic import BaseModel
 
 from database import get_db
-from models import User, Vendor, Lender, Invoice, MarketplaceListing, RepaymentSchedule, VerificationCheck, ActivityLog
+from models import User, Vendor, Lender, Invoice, MarketplaceListing, RepaymentSchedule, VerificationCheck, ActivityLog, Notification, FractionalInvestment
 from routes.auth import get_current_user
 
 router = APIRouter(prefix="/api/admin", tags=["admin"])
@@ -18,6 +18,7 @@ router = APIRouter(prefix="/api/admin", tags=["admin"])
 class AdminActionRequest(BaseModel):
     action: str
     note: Optional[str] = None
+    penalty_amount: Optional[float] = None
 
 
 def _require_admin(user: User):
@@ -131,6 +132,9 @@ def admin_vendors(db: Session = Depends(get_db), current_user: User = Depends(ge
             "cibil_score": v.cibil_score,
             "total_owed": total_owed,
             "overdue_installments": overdue,
+            "blacklisted": getattr(v, 'blacklisted', False),
+            "penalty_amount": getattr(v, 'penalty_amount', 0),
+            "total_defaults": getattr(v, 'total_defaults', 0),
         })
 
     return result
@@ -189,6 +193,10 @@ def admin_defaults(db: Session = Depends(get_db), current_user: User = Depends(g
                 "phone": vendor.phone,
                 "email": vendor.email,
                 "risk_score": vendor.risk_score,
+                "profile_status": vendor.profile_status,
+                "blacklisted": getattr(vendor, 'blacklisted', False),
+                "penalty_amount": getattr(vendor, 'penalty_amount', 0),
+                "total_defaults": getattr(vendor, 'total_defaults', 0),
                 "overdue_amount": 0,
                 "overdue_installments": [],
             }
@@ -206,7 +214,7 @@ def admin_defaults(db: Session = Depends(get_db), current_user: User = Depends(g
 
 
 # ═══════════════════════════════════════════════
-#  ADMIN ACTIONS
+#  ADMIN ACTIONS  (enhanced for defaulter mgmt)
 # ═══════════════════════════════════════════════
 
 @router.post("/vendor/{vendor_id}/action")
@@ -216,7 +224,7 @@ def admin_vendor_action(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """Admin action on a vendor — suspend, warn, approve, etc."""
+    """Admin action on a vendor — suspend, warn, approve, blacklist, penalty, send_notice, freeze, unfreeze, reinstate."""
     _require_admin(current_user)
 
     action = body.action
@@ -226,16 +234,119 @@ def admin_vendor_action(
     if not vendor:
         raise HTTPException(status_code=404, detail="Vendor not found")
 
+    # ---------- action handlers ----------
     if action == "suspend":
         vendor.profile_status = "suspended"
         vendor.verification_notes = f"Suspended by admin. {note or ''}"
+
     elif action == "approve":
         vendor.profile_status = "verified"
         vendor.verification_notes = f"Approved by admin. {note or ''}"
+
     elif action == "warn":
         vendor.verification_notes = f"Admin Warning: {note or 'Payment overdue'}"
+        # also send in-app notification
+        notif = Notification(
+            user_id=vendor.user_id,
+            title="⚠️ Admin Warning",
+            message=note or "You have overdue payments. Please clear them immediately.",
+            type="warning",
+        )
+        db.add(notif)
+
+    elif action == "blacklist":
+        vendor.blacklisted = True
+        vendor.blacklisted_at = datetime.utcnow()
+        vendor.blacklist_reason = note or "Repeated payment defaults"
+        vendor.profile_status = "blacklisted"
+        vendor.total_defaults = (vendor.total_defaults or 0) + 1
+        vendor.verification_notes = f"Blacklisted by admin. {note or ''}"
+        notif = Notification(
+            user_id=vendor.user_id,
+            title="🚫 Account Blacklisted",
+            message=f"Your account has been blacklisted. Reason: {note or 'Payment defaults'}. Contact support to appeal.",
+            type="critical",
+        )
+        db.add(notif)
+
+    elif action == "impose_penalty":
+        amount = body.penalty_amount or 0
+        if amount <= 0:
+            raise HTTPException(status_code=400, detail="penalty_amount must be > 0")
+        vendor.penalty_amount = (vendor.penalty_amount or 0) + amount
+        vendor.penalty_reason = note or "Late payment penalty"
+        vendor.verification_notes = f"Penalty ₹{amount:.2f} imposed. {note or ''}"
+        notif = Notification(
+            user_id=vendor.user_id,
+            title="💰 Penalty Imposed",
+            message=f"A penalty of ₹{amount:.2f} has been imposed on your account. Reason: {note or 'Late payment'}.",
+            type="warning",
+        )
+        db.add(notif)
+
+    elif action == "send_notice":
+        notif = Notification(
+            user_id=vendor.user_id,
+            title="📋 Legal / Recovery Notice",
+            message=note or "You are hereby notified of outstanding payment obligations. Failure to comply may result in legal action.",
+            type="critical",
+        )
+        db.add(notif)
+        vendor.verification_notes = f"Notice sent by admin. {note or ''}"
+
+    elif action == "freeze":
+        vendor.profile_status = "suspended"
+        vendor.verification_notes = f"Account frozen by admin. {note or 'All marketplace activity halted'}"
+        # Cancel all open listings for this vendor
+        open_listings = db.query(MarketplaceListing).filter(
+            MarketplaceListing.vendor_id == vendor_id,
+            MarketplaceListing.status == "open",
+        ).all()
+        for lst in open_listings:
+            lst.status = "cancelled"
+        notif = Notification(
+            user_id=vendor.user_id,
+            title="❄️ Account Frozen",
+            message=f"Your account and all open listings have been frozen. Reason: {note or 'Admin action'}. Contact support.",
+            type="critical",
+        )
+        db.add(notif)
+
+    elif action == "unfreeze":
+        vendor.profile_status = "verified"
+        vendor.verification_notes = f"Account unfrozen by admin. {note or ''}"
+        notif = Notification(
+            user_id=vendor.user_id,
+            title="✅ Account Unfrozen",
+            message="Your account has been restored. You may resume marketplace activity.",
+            type="info",
+        )
+        db.add(notif)
+
+    elif action == "reinstate":
+        vendor.blacklisted = False
+        vendor.blacklisted_at = None
+        vendor.blacklist_reason = None
+        vendor.profile_status = "verified"
+        vendor.verification_notes = f"Reinstated by admin. {note or ''}"
+        notif = Notification(
+            user_id=vendor.user_id,
+            title="✅ Account Reinstated",
+            message="Your blacklist has been lifted and your account is now active again.",
+            type="info",
+        )
+        db.add(notif)
+
+    elif action == "clear_penalty":
+        vendor.penalty_amount = 0
+        vendor.penalty_reason = None
+        vendor.verification_notes = f"Penalty cleared by admin. {note or ''}"
+
     else:
-        raise HTTPException(status_code=400, detail="Invalid action. Use: suspend, approve, warn")
+        raise HTTPException(
+            status_code=400,
+            detail="Invalid action. Use: suspend, approve, warn, blacklist, impose_penalty, send_notice, freeze, unfreeze, reinstate, clear_penalty",
+        )
 
     # Log activity
     entry = ActivityLog(
@@ -248,4 +359,9 @@ def admin_vendor_action(
     db.add(entry)
     db.commit()
 
-    return {"message": f"Action '{action}' applied to vendor {vendor.full_name}", "new_status": vendor.profile_status}
+    return {
+        "message": f"Action '{action}' applied to vendor {vendor.full_name}",
+        "new_status": vendor.profile_status,
+        "blacklisted": getattr(vendor, 'blacklisted', False),
+        "penalty_amount": getattr(vendor, 'penalty_amount', 0),
+    }

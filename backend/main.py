@@ -32,6 +32,35 @@ from routes.telegram import router as telegram_router
 # Create tables
 Base.metadata.create_all(bind=engine)
 
+# Auto-migrate: add new columns to existing SQLite tables if missing
+def _auto_migrate():
+    """Add missing columns to existing tables (SQLite ALTER TABLE ADD COLUMN)."""
+    from sqlalchemy import text, inspect
+    insp = inspect(engine)
+    migrations = [
+        ("invoices", "file_hash", "VARCHAR(64)"),
+        ("vendors", "blacklisted", "BOOLEAN DEFAULT 0"),
+        ("vendors", "blacklisted_at", "DATETIME"),
+        ("vendors", "blacklist_reason", "TEXT"),
+        ("vendors", "penalty_amount", "FLOAT DEFAULT 0"),
+        ("vendors", "penalty_reason", "TEXT"),
+        ("vendors", "total_defaults", "INTEGER DEFAULT 0"),
+    ]
+    with engine.connect() as conn:
+        for table, col, col_type in migrations:
+            try:
+                existing_cols = [c["name"] for c in insp.get_columns(table)]
+                if col not in existing_cols:
+                    conn.execute(text(f"ALTER TABLE {table} ADD COLUMN {col} {col_type}"))
+                    conn.commit()
+            except Exception:
+                pass
+
+try:
+    _auto_migrate()
+except Exception:
+    pass
+
 app = FastAPI(
     title="InvoX API",
     description="Embedded Invoice Financing Platform for MSMEs",

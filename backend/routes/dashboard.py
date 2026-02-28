@@ -226,13 +226,39 @@ def lender_dashboard(lender_id: int, db: Session = Depends(get_db), current_user
             if l.listing_status == "settled":
                 total_interest_earned += interest
 
-    # ── Portfolio risk distribution ──
+    # ── Portfolio risk distribution (multi-factor) ──
+    # Compute risk based on actual credit factors: CIBIL score, GST compliance,
+    # repayment track record, invoice size relative to turnover
     risk_dist = {"low": 0, "medium": 0, "high": 0}
     for l in funded:
-        score = l.risk_score or 50
-        if score <= 30:
+        vendor = db.query(Vendor).filter(Vendor.id == l.vendor_id).first()
+        if not vendor:
+            risk_dist["medium"] += 1
+            continue
+
+        # Factor 1: CIBIL Score (0-40 points)   — 750+ = 40, 650-750 = 25, <650 = 10
+        cibil = vendor.cibil_score or 650
+        cibil_pts = 40 if cibil >= 750 else (25 if cibil >= 650 else 10)
+
+        # Factor 2: GST Compliance (0-20 points) — active = 20, irregular = 10, lapsed = 0
+        gst_status = (vendor.gst_compliance_status or "").lower()
+        gst_pts = 20 if "active" in gst_status or "compliant" in gst_status else (10 if gst_status else 0)
+
+        # Factor 3: Repayment history (0-25 points)
+        sched_items = db.query(RepaymentSchedule).filter(RepaymentSchedule.listing_id == l.id).all()
+        paid = sum(1 for s in sched_items if s.status == "paid")
+        total_inst = len(sched_items) if sched_items else 1
+        repay_pts = round(25 * (paid / total_inst)) if total_inst > 0 else 12
+
+        # Factor 4: Business maturity (0-15 points) — years in business
+        yrs = (datetime.now().year - (vendor.year_of_establishment or 2020))
+        biz_pts = min(15, yrs * 3)  # 5+ yrs = full 15
+
+        credit_score = cibil_pts + gst_pts + repay_pts + biz_pts  # 0-100
+
+        if credit_score >= 65:
             risk_dist["low"] += 1
-        elif score <= 60:
+        elif credit_score >= 40:
             risk_dist["medium"] += 1
         else:
             risk_dist["high"] += 1
@@ -323,6 +349,11 @@ def lender_dashboard(lender_id: int, db: Session = Depends(get_db), current_user
             "settled_investments": settled_investments,
             "total_returns": round(total_interest_earned, 2),
             "roi_percent": round((total_interest_earned / total_funded_amount * 100), 2) if total_funded_amount > 0 else 0,
+        },
+        "wallet": {
+            "balance": round(lender.wallet_balance or 0, 2),
+            "escrow_locked": round(lender.escrow_locked or 0, 2),
+            "total_withdrawn": round(getattr(lender, 'total_withdrawn', 0) or 0, 2),
         },
         "available_market": {
             "listings_count": available,

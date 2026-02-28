@@ -534,7 +534,7 @@ export default function InvoXPayCheckout({ orderData, onSuccess, onFailure, onDi
                 <div className="flex justify-between"><span className="text-gray-500">Status</span><span className="font-bold text-emerald-600">Confirmed</span></div>
               </div>
               <p className="text-[10px] text-gray-400 mt-4 flex items-center justify-center gap-1">
-                <Shield className="w-3 h-3" /> Secured by InvoX Pay · Blockchain verified
+                <Shield className="w-3 h-3" /> Secured by Razorpay + InvoX Pay · Blockchain verified
               </p>
             </div>
           )}
@@ -574,7 +574,7 @@ export default function InvoXPayCheckout({ orderData, onSuccess, onFailure, onDi
               <span>256-bit SSL</span>
             </div>
             <span>•</span>
-            <span className="font-semibold text-indigo-500">Razorpay + InvoX Pay</span>
+            <span className="font-semibold text-indigo-500">InvoX Pay</span>
           </div>
         </div>
       </div>

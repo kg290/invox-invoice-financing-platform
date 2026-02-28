@@ -10,6 +10,7 @@ import {
   AlertTriangle, ArrowLeft, Receipt, Wallet, ChevronDown, ChevronUp,
 } from "lucide-react";
 import api, { getErrorMessage } from "@/lib/api";
+import InvoXPayCheckout, { type OrderData } from "@/components/InvoXPayCheckout";
 
 interface Installment {
   id: number;
@@ -43,6 +44,8 @@ export default function VendorRepayments() {
   const [loading, setLoading] = useState(true);
   const [paying, setPaying] = useState<number | null>(null);
   const [expanded, setExpanded] = useState<Record<number, boolean>>({});
+  const [paymentOrder, setPaymentOrder] = useState<OrderData | null>(null);
+  const [activeInstallmentId, setActiveInstallmentId] = useState<number | null>(null);
 
   const fetchRepayments = async () => {
     setLoading(true);
@@ -65,17 +68,32 @@ export default function VendorRepayments() {
 
   const handlePay = async (listingId: number, installmentId: number) => {
     setPaying(installmentId);
+    setActiveInstallmentId(installmentId);
     try {
-      const r = await api.post(`/marketplace/listings/${listingId}/repayment/${installmentId}/pay`);
-      toast.success(r.data.message);
-      if (r.data.remaining === 0) {
-        toast.success("All installments paid! Invoice settled.", { duration: 5000 });
-      }
-      fetchRepayments();
+      const r = await api.post("/payments/create-repayment-order", {
+        listing_id: listingId,
+        installment_id: installmentId,
+      });
+      setPaymentOrder(r.data);
     } catch (err) {
-      toast.error(getErrorMessage(err, "Payment failed"));
+      toast.error(getErrorMessage(err, "Failed to create payment order"));
+      setPaying(null);
+      setActiveInstallmentId(null);
     }
+  };
+
+  const handlePaymentSuccess = () => {
+    toast.success("Payment successful! Installment marked as paid.");
+    setPaymentOrder(null);
     setPaying(null);
+    setActiveInstallmentId(null);
+    fetchRepayments();
+  };
+
+  const handlePaymentDismiss = () => {
+    setPaymentOrder(null);
+    setPaying(null);
+    setActiveInstallmentId(null);
   };
 
   const toggleExpand = (listingId: number) => {
@@ -342,6 +360,15 @@ export default function VendorRepayments() {
         )}
       </div>
     </div>
+
+    {/* InvoX Pay Gateway Modal */}
+    {paymentOrder && (
+      <InvoXPayCheckout
+        orderData={paymentOrder}
+        onSuccess={handlePaymentSuccess}
+        onDismiss={handlePaymentDismiss}
+      />
+    )}
     </ProtectedRoute>
   );
 }

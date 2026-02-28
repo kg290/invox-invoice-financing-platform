@@ -21,7 +21,7 @@ import uuid
 import json
 
 from database import get_db
-from models import Invoice, InvoiceItem, MarketplaceListing, Vendor, Lender, BlockchainBlock, RepaymentSchedule, Notification, ActivityLog, User, FractionalInvestment
+from models import Invoice, InvoiceItem, MarketplaceListing, Vendor, Lender, BlockchainBlock, RepaymentSchedule, Notification, ActivityLog, User, FractionalInvestment, TimeLockRelease
 from blockchain import add_block, validate_chain, hash_data
 from pdf_generator import generate_invoice_pdf
 from routes.auth import get_current_user
@@ -361,6 +361,28 @@ def list_invoice_on_marketplace(
 
     if invoice.payment_status == "paid":
         raise HTTPException(status_code=400, detail="Cannot list a fully paid invoice")
+
+    # ── OCR verification required — no manual bills allowed ──
+    if not invoice.source or invoice.source not in ("ocr_upload", "telegram"):
+        raise HTTPException(
+            status_code=400,
+            detail="Only OCR-verified invoices can be listed on the marketplace. Please upload your invoice document (image/PDF) through the OCR upload feature to prevent fraud."
+        )
+    if invoice.ocr_status != "ocr_done":
+        if invoice.ocr_status == "processing":
+            raise HTTPException(status_code=400, detail="OCR is still processing this invoice. Please wait and try again.")
+        elif invoice.ocr_status == "failed":
+            raise HTTPException(status_code=400, detail="OCR failed for this invoice. Please re-upload a clearer image.")
+        else:
+            raise HTTPException(status_code=400, detail="Invoice has not been verified by OCR. Please upload the invoice document first.")
+
+    # ── Vendor blacklist check ──
+    vendor = db.query(Vendor).filter(Vendor.id == invoice.vendor_id).first()
+    if vendor and getattr(vendor, 'blacklisted', False):
+        raise HTTPException(status_code=403, detail="Your account has been blacklisted due to payment defaults. You cannot list invoices.")
+
+    if vendor and vendor.profile_status in ("suspended", "blacklisted"):
+        raise HTTPException(status_code=403, detail=f"Your account is {vendor.profile_status}. Contact admin to resolve.")
 
     # ── Double-listing protection: check ALL active statuses ──
     existing = db.query(MarketplaceListing).filter(
@@ -919,6 +941,9 @@ def fund_listing(listing_id: int, data: FundListingRequest, db: Session = Depend
             )
             db.add(sched)
 
+        # ── Create Time-Lock release schedule (anti hit-and-run) ──
+        create_timelock_schedule(db, listing_id, listing.vendor_id, new_total, listing.funded_at)
+
         # Notify vendor — fully funded
         vendor_user = db.query(User).filter(User.vendor_id == listing.vendor_id).first()
         if vendor_user:
@@ -1404,6 +1429,189 @@ def topup_lender_wallet(data: WalletTopUpRequest, db: Session = Depends(get_db),
         "message": f"₹{data.amount:,.0f} added to wallet",
         "new_balance": lender.wallet_balance,
         "escrow_locked": lender.escrow_locked or 0,
+    }
+
+
+class WalletWithdrawRequest(BaseModel):
+    lender_id: int
+    amount: float = Field(..., gt=0, description="Amount to withdraw (₹)")
+    bank_account: Optional[str] = None
+
+
+@router.post("/lender/wallet/withdraw")
+def withdraw_from_wallet(data: WalletWithdrawRequest, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+    """Withdraw available balance from lender's wallet to bank account."""
+    if current_user.role not in ("lender", "admin"):
+        raise HTTPException(status_code=403, detail="Only lenders can withdraw")
+
+    lender = db.query(Lender).filter(Lender.id == data.lender_id).first()
+    if not lender:
+        raise HTTPException(status_code=404, detail="Lender not found")
+
+    available = lender.wallet_balance or 0
+    if data.amount > available:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Insufficient balance. Available: ₹{available:,.2f}, Requested: ₹{data.amount:,.2f}"
+        )
+
+    lender.wallet_balance = round(available - data.amount, 2)
+    lender.total_withdrawn = round((getattr(lender, 'total_withdrawn', 0) or 0) + data.amount, 2)
+
+    # Record on blockchain
+    block_data = {
+        "type": "withdrawal",
+        "lender_id": lender.id,
+        "amount": data.amount,
+        "remaining_balance": lender.wallet_balance,
+        "withdrawn_at": datetime.now(timezone.utc).isoformat(),
+    }
+    block = add_block(db, "withdrawal", block_data)
+
+    db.add(ActivityLog(
+        entity_type="lender", entity_id=lender.id,
+        action="withdrawal",
+        description=f"₹{data.amount:,.0f} withdrawn to bank. Remaining: ₹{lender.wallet_balance:,.0f}",
+    ))
+
+    db.add(Notification(
+        user_id=current_user.id,
+        title="Withdrawal Processed ✅",
+        message=f"₹{data.amount:,.0f} has been withdrawn. Remaining balance: ₹{lender.wallet_balance:,.0f}",
+        notification_type="wallet",
+    ))
+
+    db.commit()
+    return {
+        "message": f"₹{data.amount:,.0f} withdrawn successfully",
+        "withdrawn_amount": data.amount,
+        "new_balance": lender.wallet_balance,
+        "escrow_locked": lender.escrow_locked or 0,
+        "blockchain_hash": block.block_hash,
+    }
+
+
+# ═══════════════════════════════════════════════
+#  TIME-LOCK RELEASE ENDPOINTS
+# ═══════════════════════════════════════════════
+
+# Time-lock tranches: prevents hit-and-run by releasing funds in stages
+TIMELOCK_TRANCHES = [
+    {"tranche": 1, "day": 0,  "pct": 50},   # Day 0:  50% released immediately
+    {"tranche": 2, "day": 7,  "pct": 20},   # Day 7:  20% released
+    {"tranche": 3, "day": 14, "pct": 15},   # Day 14: 15% released
+    {"tranche": 4, "day": 30, "pct": 15},   # Day 30: 15% released (final)
+]
+
+
+def create_timelock_schedule(db: Session, listing_id: int, vendor_id: int, total_amount: float, funded_at: datetime):
+    """Create time-lock release tranches for a newly funded listing."""
+    for t in TIMELOCK_TRANCHES:
+        release_date = (funded_at + timedelta(days=t["day"])).strftime("%Y-%m-%d")
+        amount = round(total_amount * t["pct"] / 100, 2)
+        # Day 0 tranche is released immediately
+        status = "released" if t["day"] == 0 else "locked"
+        released_at_val = funded_at if t["day"] == 0 else None
+
+        tl = TimeLockRelease(
+            listing_id=listing_id,
+            vendor_id=vendor_id,
+            tranche_number=t["tranche"],
+            release_day=t["day"],
+            release_date=release_date,
+            release_percentage=t["pct"],
+            release_amount=amount,
+            status=status,
+            released_at=released_at_val,
+        )
+        db.add(tl)
+
+    # Record on blockchain
+    block = add_block(db, "timelock_created", {
+        "type": "timelock_schedule",
+        "listing_id": listing_id,
+        "vendor_id": vendor_id,
+        "total_amount": total_amount,
+        "tranches": TIMELOCK_TRANCHES,
+        "created_at": funded_at.isoformat(),
+    })
+
+    return block
+
+
+@router.get("/listings/{listing_id}/timelock")
+def get_timelock_schedule(listing_id: int, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+    """Get time-lock release schedule for a listing."""
+    listing = db.query(MarketplaceListing).filter(MarketplaceListing.id == listing_id).first()
+    if not listing:
+        raise HTTPException(status_code=404, detail="Listing not found")
+
+    releases = db.query(TimeLockRelease).filter(
+        TimeLockRelease.listing_id == listing_id
+    ).order_by(TimeLockRelease.tranche_number).all()
+
+    # Auto-release eligible tranches
+    today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    released_now = []
+    for r in releases:
+        if r.status == "locked" and r.release_date <= today:
+            r.status = "released"
+            r.released_at = datetime.now(timezone.utc)
+            released_now.append(r.tranche_number)
+            # Blockchain record
+            add_block(db, "timelock_release", {
+                "type": "timelock_tranche_released",
+                "listing_id": listing_id,
+                "tranche": r.tranche_number,
+                "amount": r.release_amount,
+                "release_day": r.release_day,
+                "released_at": datetime.now(timezone.utc).isoformat(),
+            })
+    if released_now:
+        db.commit()
+
+    total_amount = sum(r.release_amount for r in releases)
+    released_amount = sum(r.release_amount for r in releases if r.status == "released")
+    locked_amount = total_amount - released_amount
+
+    return {
+        "listing_id": listing_id,
+        "total_amount": total_amount,
+        "released_amount": released_amount,
+        "locked_amount": locked_amount,
+        "tranches": [{
+            "tranche_number": r.tranche_number,
+            "release_day": r.release_day,
+            "release_date": r.release_date,
+            "release_percentage": r.release_percentage,
+            "release_amount": r.release_amount,
+            "status": r.status,
+            "released_at": r.released_at.isoformat() if r.released_at else None,
+        } for r in releases],
+    }
+
+
+@router.get("/lender/{lender_id}/withdrawable")
+def get_withdrawable_balance(lender_id: int, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+    """Get lender's withdrawable balance (wallet balance from settled+released funds)."""
+    lender = db.query(Lender).filter(Lender.id == lender_id).first()
+    if not lender:
+        raise HTTPException(status_code=404, detail="Lender not found")
+
+    # Get all settled investments for this lender
+    settled = db.query(FractionalInvestment).filter(
+        FractionalInvestment.lender_id == lender_id,
+        FractionalInvestment.status == "settled",
+    ).all()
+
+    return {
+        "wallet_balance": lender.wallet_balance or 0,
+        "escrow_locked": lender.escrow_locked or 0,
+        "total_invested": lender.total_invested or 0,
+        "total_returns": lender.total_returns or 0,
+        "total_withdrawn": getattr(lender, 'total_withdrawn', 0) or 0,
+        "withdrawable": lender.wallet_balance or 0,
+        "settled_investments": len(settled),
     }
 
 

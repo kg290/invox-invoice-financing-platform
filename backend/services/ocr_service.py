@@ -196,15 +196,25 @@ def _extract_invoice_date(text: str) -> Optional[str]:
             m = date_re.search(rest)
             if m:
                 return _normalize_date(m.group(1))
-            # Search subsequent lines — prefer STANDALONE date lines
-            for j in range(i + 1, min(i + 12, len(lines))):
+            # Search subsequent lines — expand window to 25 lines for
+            # column-based OCR layouts where labels and values are far apart
+            for j in range(i + 1, min(i + 25, len(lines))):
                 nxt = lines[j].strip()
                 m = date_re.search(nxt)
                 if m:
-                    # Only accept if the line is mostly just a date
-                    # Skip lines with HSN codes (start with 3+ digits followed by more data)
+                    # Skip lines with HSN codes (start with 4+ digits followed by more data)
                     if re.match(r"^\d{4,}\s", nxt):
-                        continue  # HSN/batch row
+                        continue
+                    # Skip batch/expiry dates (lines containing "batch" or "exp")
+                    if re.search(r"batch|exp\b", nxt, re.IGNORECASE):
+                        continue
+                    # For colon-prefixed value lines (typical in column-based OCR),
+                    # accept if it's a clean date
+                    clean = nxt.lstrip(": ").strip()
+                    m2 = date_re.match(clean)
+                    if m2:
+                        return _normalize_date(m2.group(1))
+                    # Also accept inline dates not on HSN rows
                     return _normalize_date(m.group(1))
 
     # Fallback: Bill Date
@@ -215,7 +225,7 @@ def _extract_invoice_date(text: str) -> Optional[str]:
             m = date_re.search(rest)
             if m:
                 return _normalize_date(m.group(1))
-            for j in range(i + 1, min(i + 5, len(lines))):
+            for j in range(i + 1, min(i + 15, len(lines))):
                 m = date_re.search(lines[j])
                 if m:
                     return _normalize_date(m.group(1))
@@ -223,35 +233,65 @@ def _extract_invoice_date(text: str) -> Optional[str]:
     return None
 
 
-def _extract_buyer_name(text: str) -> Optional[str]:
+# Keywords that disqualify a line from being a buyer name
+_NAME_EXCLUDE_KWS = [
+    "invoice", "date", "no.", "gst", "license", "phone", "email",
+    "address", "tax", "sr.", "description", "discription", "particulars",
+    "hsn", "qty", "rate", "amount", "batch", "exp", "bank", "ifsc",
+    "cgst", "sgst", "igst", "cess", "round", "total", "subject",
+    "receiver", "seal", "signature", "m/s", "for:", "we declare",
+    "jurisdiction", "in-words", "current a/c", "our bank",
+]
+
+
+def _is_name_candidate(line: str, seller_name: str = "") -> bool:
+    """Check if a line looks like a person/company name."""
+    c = line.strip()
+    if len(c) < 3 or len(c) > 60:
+        return False
+    if re.match(r"^[:\-\.\d]", c):          # starts with :, -, digit, dot
+        return False
+    if re.match(r"^\d+$", c):                 # purely numeric
+        return False
+    if not re.search(r"[A-Za-z]{2,}", c):     # must contain letters
+        return False
+    if GSTIN_RE.search(c):                     # GSTIN
+        return False
+    low = c.lower()
+    if any(kw in low for kw in _NAME_EXCLUDE_KWS):
+        return False
+    # Don't pick the seller name again
+    if seller_name and low == seller_name.lower():
+        return False
+    return True
+
+
+def _extract_buyer_name(text: str, seller_name: str = "") -> Optional[str]:
     """
     Extract buyer/customer name. In Indian invoices this is often:
     - After a label like "Bill To", "Sold To", "Buyer", "Customer"
     - Or a standalone name line right before the items table
+    - Or identifiable by looking backwards from the table header
     """
     lines = _lines(text)
 
-    # Strategy 1: Labelled buyer
+    # ── Strategy 1: Labelled buyer ──
     buyer_labels = re.compile(
-        r"(?:Bill\s*To|Sold\s*To|Buyer|Ship\s*To|Customer|Billed\s*To|Consignee|Recipient)\s*[:\-]?\s*",
+        r"(?:Bill\s*To|Sold\s*To|Buyer|Ship\s*To|Customer|Billed\s*To|Consignee|Recipient|M/s\.?)\s*[:\-]?\s*",
         re.IGNORECASE,
     )
     for i, line in enumerate(lines):
         m = buyer_labels.search(line)
         if m:
-            # Value on same line after label
             after = line[m.end():].strip()
-            if after and len(after) > 2:
+            if after and len(after) > 2 and _is_name_candidate(after, seller_name):
                 return re.sub(r"[:\-|]$", "", after).strip()
-            # Next line
             if i + 1 < len(lines):
                 nxt = lines[i + 1].strip()
-                if nxt and len(nxt) > 2 and not re.match(r"^\d", nxt):
+                if _is_name_candidate(nxt, seller_name):
                     return nxt
-    
-    # Strategy 2: Find a name-like line between seller info and the items table.
-    # In many Indian invoices, the buyer name appears standalone after the seller
-    # address block and before "Sr." or "Description" or the table header.
+
+    # ── Locate table start ──
     table_start_markers = ["sr.", "description", "discription", "particulars", "item",
                            "sl.", "s.no", "hsn", "qty"]
     table_start_idx = len(lines)
@@ -260,26 +300,38 @@ def _extract_buyer_name(text: str) -> Optional[str]:
             table_start_idx = i
             break
 
-    # The seller block usually has phone, email, address keywords
-    # Limit to first 10 lines to avoid matching GST labels deeper in the invoice
+    # ── Strategy 2 (backwards from table): most reliable for Indian invoices ──
+    # The buyer name typically appears 1-5 lines BEFORE the table header.
+    # Walk backwards from table_start, skipping place-name single words
+    # (city/town names like "RANZANI") and look for a multi-word name.
+    for i in range(table_start_idx - 1, max(0, table_start_idx - 8), -1):
+        candidate = lines[i].strip()
+        if not _is_name_candidate(candidate, seller_name):
+            continue
+        # Prefer multi-word candidates ("ARJUN PATIL") over single-word
+        words = candidate.split()
+        if len(words) >= 2 and all(w[0].isupper() for w in words if w.isalpha()):
+            return candidate
+    # If no multi-word found, accept single-word name near table start
+    for i in range(table_start_idx - 1, max(0, table_start_idx - 5), -1):
+        candidate = lines[i].strip()
+        if _is_name_candidate(candidate, seller_name) and len(candidate.split()) == 1:
+            return candidate
+
+    # ── Strategy 3 (forward scan): search between seller block and table ──
     seller_end_idx = 0
     seller_kws = ["phone", "email", "e-mail", "mob", "fax", "tel", "tax invoice",
                    "gstin", "gst no", "dist.", "tal."]
-    for i, line in enumerate(lines[:min(12, table_start_idx)]):
+    for i, line in enumerate(lines[:min(15, table_start_idx)]):
         if any(kw in line.lower() for kw in seller_kws):
             seller_end_idx = max(seller_end_idx, i)
 
-    # Look for a standalone name between seller block and table
-    for i in range(seller_end_idx + 1, min(table_start_idx, seller_end_idx + 6)):
-        if i < len(lines):
-            candidate = lines[i].strip()
-            # A name: mostly letters, not too long, not a keyword
-            if (len(candidate) > 2 and len(candidate) < 60
-                    and re.search(r"[A-Za-z]{2,}", candidate)
-                    and not re.match(r"^\d+$", candidate)
-                    and not any(kw in candidate.lower() for kw in
-                                ["invoice", "date", "no.", "gst", "license", "phone",
-                                 "email", "address", "tax", "sr.", "description"])):
+    # Scan all lines from seller end to table start (not just +6)
+    for i in range(seller_end_idx + 1, table_start_idx):
+        candidate = lines[i].strip()
+        if _is_name_candidate(candidate, seller_name):
+            words = candidate.split()
+            if len(words) >= 2:
                 return candidate
 
     return None
@@ -299,44 +351,47 @@ def _extract_seller_name(text: str) -> Optional[str]:
 
 def _extract_total_amount(text: str) -> Optional[float]:
     """
-    Extract the grand total / final amount. Strategies:
-    1. ₹/Rs prefix with the largest value
-    2. "Total Amount" or "Grand Total" label nearby
+    Extract the grand total / final amount. Strategies (in priority order):
+    1. "Grand Total" / "Total Amount" label nearby (most reliable)
+    2. ₹/Rs prefix with the largest value (min ₹50 threshold)
     3. "In-Words" line mentions the amount
     4. Largest amount in the document
     """
     lines = _lines(text)
     number_re = re.compile(r"[\d,]+\.\d{2}")
 
-    # Strategy 1: Find ₹ / Rs. prefixed amounts — take the largest
+    # Strategy 1 (HIGHEST PRIORITY): "Total Amount" / "Grand Total" label — look for number nearby
+    total_label = re.compile(
+        r"Grand\s*Total|Total\s*Amount|Net\s*(?:Amount|Payable)|Amount\s*(Due|Payable)|Bill\s*Amount",
+        re.IGNORECASE,
+    )
+    # Match decimal amounts like 3,663.20 OR integer amounts like 3,663 or 3663
+    amount_re = re.compile(r"([\d,]+\.\d{1,2}|\b[\d,]{3,10}\b)")
+    for i, line in enumerate(lines):
+        if total_label.search(line):
+            # Same line — strip the label text first
+            rest = total_label.sub("", line).strip()
+            m = amount_re.search(rest)
+            if m:
+                v = _parse_num(m.group(1))
+                if v and 10 < v < 10_000_000:  # Cap at 1 crore for sanity
+                    return v
+            # Next few lines
+            for j in range(i + 1, min(i + 4, len(lines))):
+                m = amount_re.search(lines[j])
+                if m:
+                    v = _parse_num(m.group(1))
+                    if v and 10 < v < 10_000_000:
+                        return v
+
+    # Strategy 2: Find ₹ / Rs. prefixed amounts — take the largest (min threshold ₹50)
     rupee_amounts = []
     for m in re.finditer(r"(?:₹|Rs\.?|INR)\s*([\d,]+\.?\d*)", text, re.IGNORECASE):
         v = _parse_num(m.group(1))
-        if v and v > 0:
+        if v and v > 50:
             rupee_amounts.append(v)
     if rupee_amounts:
         return max(rupee_amounts)
-
-    # Strategy 2: "Total Amount" / "Grand Total" label — look for number nearby
-    total_label = re.compile(
-        r"Grand\s*Total|Total\s*Amount|Net\s*(?:Amount|Payable)|Amount\s*(Due|Payable)",
-        re.IGNORECASE,
-    )
-    for i, line in enumerate(lines):
-        if total_label.search(line):
-            # Same line
-            m = number_re.search(line)
-            if m:
-                v = _parse_num(m.group(0))
-                if v and v > 100:
-                    return v
-            # Next few lines
-            for j in range(i + 1, min(i + 6, len(lines))):
-                m = number_re.search(lines[j])
-                if m:
-                    v = _parse_num(m.group(0))
-                    if v and v > 100:
-                        return v
 
     # Strategy 3: "In-Words" line sometimes has the amount nearby
     for i, line in enumerate(lines):
@@ -368,15 +423,16 @@ def _extract_line_items(text: str) -> list[dict]:
 
     Strategy:
     1. Find numbered product descriptions (1 ProductName, 2 ProductName...)
-    2. Find qty + rate rows (4 Nos 635.59...)
-    3. Find amounts column values
-    4. Correlate by order
+    2. Find HSN codes (4-8 digit codes near descriptions)
+    3. Find qty + rate rows (4 Nos 635.59...)
+    4. Find amounts column values
+    5. Correlate by order
     """
     lines = _lines(text)
 
     # ── Find product descriptions ──
     # Pattern: Sr.No followed by product name, e.g. "1 Natio (100 Gm)"
-    desc_re = re.compile(r"^(\d{1,2})\s+([A-Za-z].{2,50})$")
+    desc_re = re.compile(r"^(\d{1,2})\s+([A-Za-z].{2,60})$")
     # Unit words that indicate a qty/rate row, not a description
     unit_words = re.compile(r"^(?:Nos|Pcs|Kg|Ltr|Box|Bag|Set|Unit|Btl|Pkt)\b", re.IGNORECASE)
     descriptions = []
@@ -392,17 +448,31 @@ def _extract_line_items(text: str) -> list[dict]:
                     "invoice" not in desc.lower() and "license" not in desc.lower()):
                 descriptions.append({"sr": sr, "description": desc})
 
+    # ── Find HSN codes ──
+    # Pattern: standalone 4-8 digit codes that appear in a column
+    hsn_re = re.compile(r"^(\d{4,8})$")
+    hsn_codes = []
+    for line in lines:
+        m = hsn_re.match(line.strip())
+        if m:
+            code = m.group(1)
+            # Filter out years (2024-2030) and very small numbers
+            if not (2000 <= int(code) <= 2030) and len(code) >= 4:
+                hsn_codes.append(code)
+
     # ── Find qty + rate rows ──
     # Pattern: "4 Nos 635.59 18 %" or "1 Nos 5,714.29 5 %"
-    qty_re = re.compile(r"(\d+)\s*(?:Nos|Pcs|Kg|Ltr|Box|Bag|Set|Unit|Btl|Pkt)\s+([\d,]+\.?\d*)\s+(\d+)\s*%?", re.IGNORECASE)
+    # Also handle: "1 NOS 254.24" (without GST %), "3 NOS 118.64 9"
+    qty_re = re.compile(r"(\d+)\s*(?:Nos|Pcs|Kg|Ltr|Box|Bag|Set|Unit|Btl|Pkt)\s+([\d,]+\.?\d*)\s*(\d+)?\s*%?", re.IGNORECASE)
     qty_rows = []
     for line in lines:
         m = qty_re.search(line)
         if m:
+            gst_pct = float(m.group(3)) if m.group(3) else 0
             qty_rows.append({
                 "quantity": float(m.group(1)),
                 "base_rate": _parse_num(m.group(2)) or 0.0,
-                "gst_percent": float(m.group(3)),
+                "gst_percent": gst_pct if gst_pct <= 28 else 0,  # Filter out non-GST numbers
             })
 
     # ── Find amount column values ──
@@ -416,15 +486,18 @@ def _extract_line_items(text: str) -> list[dict]:
 
     for idx in range(num_items):
         item = {"description": "OCR Item", "quantity": 1, "unit": "NOS",
-                "unit_price": 0.0, "gst_rate": 18, "total": 0.0}
+                "unit_price": 0.0, "gst_rate": 18, "total": 0.0, "hsn_sac_code": "0000"}
 
         if idx < len(descriptions):
             item["description"] = descriptions[idx]["description"]
         if idx < len(qty_rows):
             item["quantity"] = qty_rows[idx]["quantity"]
             item["unit_price"] = qty_rows[idx]["base_rate"]
-            item["gst_rate"] = qty_rows[idx]["gst_percent"]
+            if qty_rows[idx]["gst_percent"] > 0:
+                item["gst_rate"] = qty_rows[idx]["gst_percent"]
             item["total"] = qty_rows[idx]["base_rate"] * qty_rows[idx]["quantity"]
+        if idx < len(hsn_codes):
+            item["hsn_sac_code"] = hsn_codes[idx]
 
         if item["description"] != "OCR Item" or item["total"] > 0:
             items.append(item)
@@ -482,7 +555,7 @@ def extract_invoice_data(raw_text: str) -> dict:
 
     # ── Names ──
     seller_name = _extract_seller_name(raw_text) or "Unknown Seller"
-    buyer_name = _extract_buyer_name(raw_text) or "Unknown Buyer"
+    buyer_name = _extract_buyer_name(raw_text, seller_name=seller_name) or "Unknown Buyer"
     if buyer_name == "Unknown Buyer":
         warnings.append("buyer_name: Could not extract")
 
@@ -491,14 +564,32 @@ def extract_invoice_data(raw_text: str) -> dict:
     if not invoice_date:
         warnings.append("invoice_date: Not found")
 
+    # ── Due date ──
+    due_date = None
+    if invoice_date:
+        try:
+            from datetime import timedelta
+            dt = datetime.strptime(invoice_date, "%Y-%m-%d")
+            due_date = (dt + timedelta(days=30)).strftime("%Y-%m-%d")
+        except:
+            pass
+
     # ── Pricing ──
     total_amount = _extract_total_amount(raw_text) or 0.0
-    if total_amount <= 0:
-        warnings.append("total_amount: Could not extract")
 
     line_items = _extract_line_items(raw_text)
     if not line_items:
         warnings.append("line_items: No line items extracted")
+
+    # If total_amount is suspiciously low but we have line items, use sum of line items
+    if line_items:
+        items_sum = sum(item.get("total", 0) for item in line_items)
+        if items_sum > 0 and (total_amount <= 0 or total_amount < items_sum * 0.5):
+            total_amount = items_sum
+            warnings.append("total_amount: Used line items sum as fallback")
+
+    if total_amount <= 0:
+        warnings.append("total_amount: Could not extract")
 
     taxes = _extract_tax_details(raw_text)
 
@@ -521,7 +612,7 @@ def extract_invoice_data(raw_text: str) -> dict:
         "seller_name": seller_name,
         "buyer_name": buyer_name,
         "invoice_date": invoice_date,
-        "due_date": None,
+        "due_date": due_date,
         "total_amount": total_amount,
         "line_items": line_items,
         "taxes": taxes,
@@ -597,11 +688,30 @@ def run_ocr_and_update(invoice_id: int, file_path: str):
             inv.invoice_date = extracted["invoice_date"]
         if extracted["due_date"]:
             inv.due_date = extracted["due_date"]
-        if extracted["total_amount"] and extracted["total_amount"] > 0:
-            inv.grand_total = extracted["total_amount"]
 
-        # Create line items
+        # Create line items with proper tax calculation
+        supply_type = inv.supply_type or "intra_state"
+        subtotal = 0.0
+        total_cgst = 0.0
+        total_sgst = 0.0
+        total_igst = 0.0
+
         for idx, item_data in enumerate(extracted.get("line_items", [])):
+            taxable = item_data.get("total", 0)
+            gst_rate = item_data.get("gst_rate", 18)
+            gst_amount = round(taxable * gst_rate / 100, 2)
+
+            if supply_type == "intra_state":
+                cgst = round(gst_amount / 2, 2)
+                sgst = round(gst_amount / 2, 2)
+                igst = 0.0
+            else:
+                cgst = 0.0
+                sgst = 0.0
+                igst = gst_amount
+
+            item_total = round(taxable + cgst + sgst + igst, 2)
+
             item = InvoiceItem(
                 invoice_id=invoice_id,
                 item_number=idx + 1,
@@ -612,11 +722,50 @@ def run_ocr_and_update(invoice_id: int, file_path: str):
                 unit_price=item_data.get("unit_price", 0),
                 discount_percent=0,
                 discount_amount=0,
-                taxable_value=item_data.get("total", 0),
-                gst_rate=item_data.get("gst_rate", 18),
-                total_amount=item_data.get("total", 0),
+                taxable_value=taxable,
+                gst_rate=gst_rate,
+                cgst_amount=cgst,
+                sgst_amount=sgst,
+                igst_amount=igst,
+                cess_rate=0,
+                cess_amount=0,
+                total_amount=item_total,
             )
             db.add(item)
+
+            subtotal += taxable
+            total_cgst += cgst
+            total_sgst += sgst
+            total_igst += igst
+
+        # Recalculate invoice-level totals from line items
+        inv.subtotal = round(subtotal, 2)
+        inv.total_cgst = round(total_cgst, 2)
+        inv.total_sgst = round(total_sgst, 2)
+        inv.total_igst = round(total_igst, 2)
+        inv.total_cess = 0.0
+        inv.total_discount = 0.0
+
+        # Use extracted grand_total if reasonable, otherwise compute from items
+        items_grand = round(subtotal + total_cgst + total_sgst + total_igst, 2)
+        extracted_total = extracted["total_amount"] or 0
+
+        # Sanity check: extracted total must be within 2x of line items total
+        # to avoid OCR misreads (e.g. account numbers parsed as amounts)
+        if (extracted_total > 0 and items_grand > 0
+                and 0.5 * items_grand <= extracted_total <= 2.0 * items_grand):
+            inv.grand_total = extracted_total
+        elif items_grand > 0:
+            inv.grand_total = items_grand
+        elif extracted_total > 0 and extracted_total < 10_000_000:
+            inv.grand_total = extracted_total
+
+        # Round-off is the small difference between exact total and displayed total
+        if items_grand > 0:
+            diff = round(inv.grand_total - items_grand, 2)
+            inv.round_off = diff if abs(diff) < 100 else 0.0
+        else:
+            inv.round_off = 0.0
 
         db.commit()
 

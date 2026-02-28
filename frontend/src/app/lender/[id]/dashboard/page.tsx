@@ -1,13 +1,14 @@
 "use client";
 
 import ProtectedRoute from "@/components/ProtectedRoute";
-import { useEffect, useState } from "react";
-import { useParams } from "next/navigation";
+import { useEffect, useState, useRef } from "react";
+import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
 import {
   FileText, Loader2, IndianRupee, TrendingUp, AlertCircle, Clock,
   Store, BarChart3, PieChart as PieIcon, Activity, Bell, Briefcase,
-  ArrowUpRight, Wallet, Target,
+  ArrowUpRight, Wallet, Target, X, Check, ArrowDownToLine, Lock, Unlock,
+  BanknoteIcon, ExternalLink, ChevronRight,
 } from "lucide-react";
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
@@ -21,17 +22,27 @@ const BIZ_COLORS = ["#3b82f6", "#8b5cf6", "#ec4899", "#f59e0b", "#22c55e", "#6b7
 
 export default function LenderDashboard() {
   const params = useParams();
+  const router = useRouter();
   const lenderId = params.id as string;
   const [data, setData] = useState<LenderDashboardData | null>(null);
   const [notifs, setNotifs] = useState<NotificationItem[]>([]);
   const [unread, setUnread] = useState(0);
   const [loading, setLoading] = useState(true);
+  const [showNotifs, setShowNotifs] = useState(false);
+  const [withdrawAmt, setWithdrawAmt] = useState("");
+  const [showWithdraw, setShowWithdraw] = useState(false);
+  const [withdrawing, setWithdrawing] = useState(false);
+  const notifRef = useRef<HTMLDivElement>(null);
 
-  useEffect(() => {
+  const fetchDashboard = () => {
     api.get(`/dashboard/lender/${lenderId}`)
       .then((r) => setData(r.data))
       .catch(() => {})
       .finally(() => setLoading(false));
+  };
+
+  useEffect(() => {
+    fetchDashboard();
 
     const storedUser = localStorage.getItem("invox_user");
     if (storedUser) {
@@ -40,6 +51,56 @@ export default function LenderDashboard() {
       api.get(`/notifications/${user.id}/unread-count`).then((r) => setUnread(r.data.unread)).catch(() => {});
     }
   }, [lenderId]);
+
+  // Close notification dropdown on outside click
+  useEffect(() => {
+    const handler = (e: MouseEvent) => {
+      if (notifRef.current && !notifRef.current.contains(e.target as Node)) setShowNotifs(false);
+    };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, []);
+
+  const markNotifRead = async (notif: NotificationItem) => {
+    if (!notif.is_read) {
+      try {
+        await api.patch(`/notifications/${notif.id}/read`);
+        setNotifs((prev) => prev.map((n) => n.id === notif.id ? { ...n, is_read: true } : n));
+        setUnread((u) => Math.max(0, u - 1));
+      } catch {}
+    }
+    if (notif.link) {
+      setShowNotifs(false);
+      router.push(notif.link);
+    }
+  };
+
+  const markAllRead = async () => {
+    const storedUser = localStorage.getItem("invox_user");
+    if (!storedUser) return;
+    const user = JSON.parse(storedUser);
+    try {
+      await api.patch(`/notifications/read-all/${user.id}`);
+      setNotifs((prev) => prev.map((n) => ({ ...n, is_read: true })));
+      setUnread(0);
+    } catch {}
+  };
+
+  const handleWithdraw = async () => {
+    const amt = parseFloat(withdrawAmt);
+    if (!amt || amt <= 0) return;
+    setWithdrawing(true);
+    try {
+      await api.post("/marketplace/lender/wallet/withdraw", { lender_id: Number(lenderId), amount: amt });
+      setShowWithdraw(false);
+      setWithdrawAmt("");
+      fetchDashboard();
+    } catch (err: unknown) {
+      const msg = (err as { response?: { data?: { detail?: string } } })?.response?.data?.detail || "Withdrawal failed";
+      alert(msg);
+    }
+    setWithdrawing(false);
+  };
 
   if (loading) return (
     <div className="min-h-screen flex items-center justify-center">
@@ -55,6 +116,7 @@ export default function LenderDashboard() {
 
   const riskPie = Object.entries(data.risk_distribution).map(([name, value]) => ({ name, value }));
   const bizPie = Object.entries(data.business_type_distribution).map(([name, value]) => ({ name, value }));
+  const wallet = data.wallet || { balance: 0, escrow_locked: 0, total_withdrawn: 0 };
 
   return (
     <ProtectedRoute>
@@ -71,10 +133,47 @@ export default function LenderDashboard() {
           <div className="flex items-center gap-4">
             <Link href="/chat" className="text-xs text-gray-500 hover:text-gray-700">Messages</Link>
             <Link href="/marketplace" className="text-xs text-gray-500 hover:text-gray-700">Marketplace</Link>
-            <div className="relative">
-              <Bell className="w-5 h-5 text-gray-400" />
-              {unread > 0 && (
-                <span className="absolute -top-1 -right-1 w-4 h-4 bg-red-500 text-white rounded-full text-[10px] flex items-center justify-center font-bold">{unread}</span>
+            {/* Notification Bell — Clickable dropdown */}
+            <div className="relative" ref={notifRef}>
+              <button onClick={() => setShowNotifs(!showNotifs)} className="relative p-1 hover:bg-gray-100 rounded-lg transition-colors">
+                <Bell className="w-5 h-5 text-gray-400" />
+                {unread > 0 && (
+                  <span className="absolute -top-1 -right-1 w-4 h-4 bg-red-500 text-white rounded-full text-[10px] flex items-center justify-center font-bold">{unread}</span>
+                )}
+              </button>
+              {showNotifs && (
+                <div className="absolute right-0 top-full mt-2 w-80 bg-white rounded-xl shadow-2xl border border-gray-100 z-50 overflow-hidden">
+                  <div className="flex items-center justify-between px-4 py-3 border-b border-gray-100">
+                    <h3 className="text-xs font-bold text-gray-800">Notifications</h3>
+                    {unread > 0 && (
+                      <button onClick={markAllRead} className="text-[10px] text-purple-600 hover:text-purple-800 font-medium">
+                        Mark all read
+                      </button>
+                    )}
+                  </div>
+                  <div className="max-h-72 overflow-y-auto divide-y divide-gray-50">
+                    {notifs.length === 0 ? (
+                      <p className="text-xs text-gray-400 text-center py-6">No notifications</p>
+                    ) : (
+                      notifs.slice(0, 10).map((n) => (
+                        <button key={n.id} onClick={() => markNotifRead(n)}
+                          className={`w-full text-left px-4 py-3 hover:bg-gray-50 transition-colors flex gap-3 items-start ${
+                            !n.is_read ? "bg-purple-50/50" : ""
+                          }`}>
+                          <div className={`w-2 h-2 rounded-full mt-1.5 flex-shrink-0 ${n.is_read ? "bg-gray-200" : "bg-purple-500"}`} />
+                          <div className="flex-1 min-w-0">
+                            <p className="text-[11px] font-semibold text-gray-800 truncate">{n.title}</p>
+                            <p className="text-[10px] text-gray-500 line-clamp-2">{n.message}</p>
+                            {n.created_at && (
+                              <p className="text-[9px] text-gray-400 mt-0.5">{new Date(n.created_at).toLocaleString("en-IN")}</p>
+                            )}
+                          </div>
+                          {n.link && <ExternalLink className="w-3 h-3 text-gray-300 mt-1 flex-shrink-0" />}
+                        </button>
+                      ))
+                    )}
+                  </div>
+                </div>
               )}
             </div>
           </div>
@@ -112,6 +211,62 @@ export default function LenderDashboard() {
           </div>
         </div>
 
+        {/* Wallet & Withdraw Section */}
+        <div className="bg-white rounded-xl border p-5">
+          <h2 className="text-sm font-semibold text-gray-800 mb-4 flex items-center gap-2">
+            <BanknoteIcon className="w-4 h-4 text-green-600" /> Wallet & Withdrawals
+          </h2>
+          <div className="grid sm:grid-cols-3 gap-4 mb-4">
+            <div className="bg-green-50 rounded-xl p-4">
+              <div className="flex items-center gap-2 text-green-700 text-[10px] uppercase tracking-wider font-semibold mb-1">
+                <Unlock className="w-3 h-3" /> Available Balance
+              </div>
+              <p className="text-2xl font-bold text-green-800">₹{wallet.balance.toLocaleString("en-IN")}</p>
+            </div>
+            <div className="bg-amber-50 rounded-xl p-4">
+              <div className="flex items-center gap-2 text-amber-700 text-[10px] uppercase tracking-wider font-semibold mb-1">
+                <Lock className="w-3 h-3" /> Escrow Locked
+              </div>
+              <p className="text-2xl font-bold text-amber-800">₹{wallet.escrow_locked.toLocaleString("en-IN")}</p>
+            </div>
+            <div className="bg-blue-50 rounded-xl p-4">
+              <div className="flex items-center gap-2 text-blue-700 text-[10px] uppercase tracking-wider font-semibold mb-1">
+                <ArrowDownToLine className="w-3 h-3" /> Total Withdrawn
+              </div>
+              <p className="text-2xl font-bold text-blue-800">₹{wallet.total_withdrawn.toLocaleString("en-IN")}</p>
+            </div>
+          </div>
+
+          {showWithdraw ? (
+            <div className="flex items-center gap-3 bg-gray-50 rounded-xl p-4">
+              <div className="flex-1">
+                <label className="text-[10px] text-gray-500 uppercase tracking-wider font-medium block mb-1">Withdraw Amount (₹)</label>
+                <input
+                  type="number"
+                  value={withdrawAmt}
+                  onChange={(e) => setWithdrawAmt(e.target.value)}
+                  placeholder={`Max ₹${wallet.balance.toLocaleString("en-IN")}`}
+                  className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm focus:ring-2 focus:ring-purple-200 focus:border-purple-500 outline-none"
+                  max={wallet.balance}
+                />
+              </div>
+              <button onClick={handleWithdraw} disabled={withdrawing || !withdrawAmt || parseFloat(withdrawAmt) <= 0}
+                className="px-5 py-2.5 bg-green-600 text-white rounded-xl text-xs font-semibold hover:bg-green-700 disabled:opacity-50 transition-colors mt-5">
+                {withdrawing ? <Loader2 className="w-4 h-4 animate-spin" /> : "Confirm Withdrawal"}
+              </button>
+              <button onClick={() => { setShowWithdraw(false); setWithdrawAmt(""); }}
+                className="p-2 text-gray-400 hover:text-gray-600 mt-5">
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+          ) : (
+            <button onClick={() => setShowWithdraw(true)} disabled={wallet.balance <= 0}
+              className="inline-flex items-center gap-2 px-5 py-2.5 bg-gradient-to-r from-green-600 to-emerald-600 text-white rounded-xl text-xs font-semibold hover:from-green-700 hover:to-emerald-700 disabled:opacity-50 transition-all shadow-sm">
+              <ArrowDownToLine className="w-4 h-4" /> Withdraw to Bank
+            </button>
+          )}
+        </div>
+
         {/* Charts Row */}
         <div className="grid lg:grid-cols-2 gap-6">
           {/* Monthly Trend */}
@@ -137,19 +292,37 @@ export default function LenderDashboard() {
             <h2 className="text-sm font-semibold text-gray-800 mb-4 flex items-center gap-2">
               <PieIcon className="w-4 h-4 text-red-500" /> Risk Distribution
             </h2>
-            {riskPie.length > 0 ? (
-              <ResponsiveContainer width="100%" height={220}>
-                <PieChart>
-                  <Pie data={riskPie} cx="50%" cy="50%" innerRadius={60} outerRadius={90}
-                    paddingAngle={3} dataKey="value"
-                    label={({ name, percent }) => `${name} ${((percent ?? 0) * 100).toFixed(0)}%`}>
-                    {riskPie.map((entry) => (
-                      <Cell key={entry.name} fill={RISK_COLORS[entry.name] || "#6b7280"} />
-                    ))}
-                  </Pie>
-                  <Tooltip />
-                </PieChart>
-              </ResponsiveContainer>
+            {riskPie.filter(d => d.value > 0).length > 0 ? (
+              <div className="flex items-center gap-4">
+                <div className="flex-1">
+                  <ResponsiveContainer width="100%" height={180}>
+                    <PieChart>
+                      <Pie data={riskPie.filter(d => d.value > 0)} cx="50%" cy="50%" innerRadius={50} outerRadius={80}
+                        paddingAngle={3} dataKey="value">
+                        {riskPie.filter(d => d.value > 0).map((entry) => (
+                          <Cell key={entry.name} fill={RISK_COLORS[entry.name] || "#6b7280"} />
+                        ))}
+                      </Pie>
+                      <Tooltip formatter={(val: number, name: string) => [`${val} investment${val !== 1 ? "s" : ""}`, name.charAt(0).toUpperCase() + name.slice(1) + " Risk"]} />
+                    </PieChart>
+                  </ResponsiveContainer>
+                </div>
+                <div className="flex flex-col gap-2.5 min-w-[120px]">
+                  {riskPie.map((entry) => {
+                    const total = riskPie.reduce((s, e) => s + e.value, 0);
+                    const pct = total > 0 ? Math.round((entry.value / total) * 100) : 0;
+                    return (
+                      <div key={entry.name} className="flex items-center gap-2">
+                        <div className="w-3 h-3 rounded-full flex-shrink-0" style={{ backgroundColor: RISK_COLORS[entry.name] || "#6b7280" }} />
+                        <div>
+                          <p className="text-xs font-medium text-gray-700 capitalize">{entry.name} Risk</p>
+                          <p className="text-[11px] text-gray-400">{entry.value} ({pct}%)</p>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
             ) : (
               <div className="flex items-center justify-center h-[200px] text-gray-400 text-sm">No risk data</div>
             )}
@@ -208,28 +381,26 @@ export default function LenderDashboard() {
           </div>
         </div>
 
-        {/* Recent Activity */}
+        {/* Recent Activity — Compact */}
         <div className="bg-white rounded-xl border p-5">
-          <h2 className="text-sm font-semibold text-gray-800 mb-4 flex items-center gap-2">
+          <h2 className="text-sm font-semibold text-gray-800 mb-3 flex items-center gap-2">
             <Activity className="w-4 h-4 text-indigo-500" /> Recent Activity
           </h2>
           {data.recent_activity.length > 0 ? (
-            <div className="grid sm:grid-cols-2 gap-3">
-              {data.recent_activity.map((a) => (
-                <div key={a.id} className="flex gap-3 items-start p-3 bg-gray-50 rounded-lg">
-                  <div className="w-2 h-2 rounded-full bg-indigo-400 mt-1.5 flex-shrink-0" />
-                  <div>
-                    <p className="text-xs font-medium text-gray-700">{a.action}</p>
-                    <p className="text-[11px] text-gray-500">{a.description}</p>
-                    {a.created_at && (
-                      <p className="text-[10px] text-gray-400 mt-0.5">{new Date(a.created_at).toLocaleString("en-IN")}</p>
-                    )}
-                  </div>
+            <div className="space-y-1">
+              {data.recent_activity.slice(0, 5).map((a) => (
+                <div key={a.id} className="flex items-center gap-3 py-2 px-3 rounded-lg hover:bg-gray-50 transition-colors">
+                  <div className="w-1.5 h-1.5 rounded-full bg-indigo-400 flex-shrink-0" />
+                  <span className="text-[11px] font-medium text-gray-700 flex-shrink-0 w-32 truncate">{a.action.replace(/_/g, " ")}</span>
+                  <span className="text-[11px] text-gray-500 flex-1 truncate">{a.description}</span>
+                  {a.created_at && (
+                    <span className="text-[10px] text-gray-400 flex-shrink-0 whitespace-nowrap">{new Date(a.created_at).toLocaleDateString("en-IN")}</span>
+                  )}
                 </div>
               ))}
             </div>
           ) : (
-            <p className="text-sm text-gray-400 text-center py-8">No recent activity</p>
+            <p className="text-sm text-gray-400 text-center py-4">No recent activity</p>
           )}
         </div>
 

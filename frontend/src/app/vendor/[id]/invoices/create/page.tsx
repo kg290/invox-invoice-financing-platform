@@ -1,155 +1,159 @@
 "use client";
 
 import ProtectedRoute from "@/components/ProtectedRoute";
-import { useState } from "react";
+import { useState, useCallback, useRef, useEffect } from "react";
 import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
 import { toast } from "sonner";
 import {
-  FileText, ArrowLeft, Plus, Trash2, Loader2, Check,
-  AlertCircle,
+  FileText, ArrowLeft, Loader2, Check, Upload, Image, X,
+  AlertCircle, CheckCircle, Clock, Eye, RefreshCw,
 } from "lucide-react";
 import api, { getErrorMessage } from "@/lib/api";
-import { INDIAN_STATES, GST_RATES, UNITS, InvoiceItem } from "@/lib/types";
 
-const emptyItem: InvoiceItem = {
-  description: "",
-  hsn_sac_code: "",
-  quantity: 1,
-  unit: "NOS",
-  unit_price: 0,
-  discount_percent: 0,
-  gst_rate: 18,
-  cess_rate: 0,
-};
+type OcrStatus = "idle" | "uploading" | "processing" | "done" | "failed";
 
-function calcItem(item: InvoiceItem, supplyType: string) {
-  const gross = item.quantity * item.unit_price;
-  const disc = +(gross * item.discount_percent / 100).toFixed(2);
-  const taxable = +(gross - disc).toFixed(2);
-  const gstAmt = +(taxable * item.gst_rate / 100).toFixed(2);
-  const cgst = supplyType === "intra_state" ? +(gstAmt / 2).toFixed(2) : 0;
-  const sgst = supplyType === "intra_state" ? +(gstAmt / 2).toFixed(2) : 0;
-  const igst = supplyType === "inter_state" ? gstAmt : 0;
-  const cess = +(taxable * item.cess_rate / 100).toFixed(2);
-  const total = +(taxable + cgst + sgst + igst + cess).toFixed(2);
-  return { disc, taxable, cgst, sgst, igst, cess, total };
+interface CreatedInvoice {
+  id: number;
+  invoice_number: string;
+  ocr_status: string;
+  grand_total: number;
+  buyer_name: string;
+  invoice_date: string;
 }
 
 export default function CreateInvoicePage() {
   const params = useParams();
   const vendorId = params.id as string;
   const router = useRouter();
-  const [submitting, setSubmitting] = useState(false);
 
-  const [form, setForm] = useState({
-    invoice_date: new Date().toISOString().slice(0, 10),
-    due_date: "",
-    supply_type: "intra_state",
-    place_of_supply: "",
-    reverse_charge: false,
-    payment_status: "unpaid",
-    buyer_name: "",
-    buyer_gstin: "",
-    buyer_address: "",
-    buyer_city: "",
-    buyer_state: "",
-    buyer_pincode: "",
-    buyer_phone: "",
-    buyer_email: "",
-    notes: "",
-    terms: "Payment due within the specified due date. Late payments attract 18% p.a. interest.",
-  });
+  const [file, setFile] = useState<File | null>(null);
+  const [preview, setPreview] = useState<string | null>(null);
+  const [status, setStatus] = useState<OcrStatus>("idle");
+  const [createdInvoice, setCreatedInvoice] = useState<CreatedInvoice | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [dragActive, setDragActive] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
-  const [items, setItems] = useState<InvoiceItem[]>([{ ...emptyItem }]);
-  const [sendEmail, setSendEmail] = useState(false);
+  const ACCEPTED_TYPES = ["image/jpeg", "image/png", "image/webp", "application/pdf"];
+  const MAX_SIZE = 15 * 1024 * 1024;
 
-  const updateForm = (field: string, value: string | boolean) =>
-    setForm((f) => ({ ...f, [field]: value }));
+  // Cleanup on unmount
+  useEffect(() => {
+    return () => {
+      if (pollRef.current) clearInterval(pollRef.current);
+    };
+  }, []);
 
-  const updateItem = (idx: number, field: string, value: string | number) =>
-    setItems((prev) => prev.map((it, i) => (i === idx ? { ...it, [field]: value } : it)));
-
-  const addItem = () => setItems((prev) => [...prev, { ...emptyItem }]);
-  const removeItem = (idx: number) => {
-    if (items.length <= 1) return;
-    setItems((prev) => prev.filter((_, i) => i !== idx));
-  };
-
-  // Totals
-  const totals = items.reduce(
-    (acc, it) => {
-      const c = calcItem(it, form.supply_type);
-      return {
-        subtotal: acc.subtotal + c.taxable,
-        cgst: acc.cgst + c.cgst,
-        sgst: acc.sgst + c.sgst,
-        igst: acc.igst + c.igst,
-        cess: acc.cess + c.cess,
-        discount: acc.discount + c.disc,
-      };
-    },
-    { subtotal: 0, cgst: 0, sgst: 0, igst: 0, cess: 0, discount: 0 }
-  );
-  const rawTotal = totals.subtotal + totals.cgst + totals.sgst + totals.igst + totals.cess;
-  const roundOff = +(Math.round(rawTotal) - rawTotal).toFixed(2);
-  const grandTotal = +(rawTotal + roundOff).toFixed(2);
-
-  const onSubmit = async () => {
-    if (!form.buyer_name || !form.place_of_supply || !form.due_date) {
-      toast.error("Fill all required fields"); return;
+  const handleFile = useCallback((f: File) => {
+    if (!ACCEPTED_TYPES.includes(f.type)) {
+      toast.error("Only JPEG, PNG, WebP, and PDF files are allowed");
+      return;
     }
-    if (items.some((it) => !it.description || !it.hsn_sac_code || it.unit_price <= 0)) {
-      toast.error("Fill all item details with valid prices"); return;
+    if (f.size > MAX_SIZE) {
+      toast.error("File must be under 15 MB");
+      return;
     }
+    setFile(f);
+    setError(null);
+    setCreatedInvoice(null);
+    setStatus("idle");
+    if (f.type.startsWith("image/")) {
+      const reader = new FileReader();
+      reader.onload = (e) => setPreview(e.target?.result as string);
+      reader.readAsDataURL(f);
+    } else {
+      setPreview(null);
+    }
+  }, []);
 
-    setSubmitting(true);
-    try {
-      const payload = {
-        ...form,
-        buyer_gstin: form.buyer_gstin || null,
-        buyer_phone: form.buyer_phone || null,
-        buyer_email: form.buyer_email || null,
-        notes: form.notes || null,
-        terms: form.terms || null,
-        items: items.map((it) => ({
-          ...it,
-          quantity: Number(it.quantity),
-          unit_price: Number(it.unit_price),
-          discount_percent: Number(it.discount_percent),
-          gst_rate: Number(it.gst_rate),
-          cess_rate: Number(it.cess_rate),
-        })),
-      };
-      const res = await api.post(`/invoices/vendor/${vendorId}`, payload);
-      toast.success(`Invoice ${res.data.invoice_number} created & recorded on blockchain!`);
+  const onDrop = useCallback((e: React.DragEvent) => {
+    e.preventDefault();
+    setDragActive(false);
+    if (e.dataTransfer.files?.[0]) handleFile(e.dataTransfer.files[0]);
+  }, [handleFile]);
 
-      // Send email to client if checkbox was checked and buyer_email exists
-      if (sendEmail && form.buyer_email) {
-        try {
-          await api.post(`/invoices/${res.data.id}/send-email`, { email: form.buyer_email });
-          toast.success(`Invoice sent to ${form.buyer_email}`);
-        } catch {
-          toast.error("Invoice created but email sending failed");
+  const onDragOver = useCallback((e: React.DragEvent) => {
+    e.preventDefault();
+    setDragActive(true);
+  }, []);
+
+  const onDragLeave = useCallback(() => setDragActive(false), []);
+
+  const pollOcrStatus = (invoiceId: number) => {
+    pollRef.current = setInterval(async () => {
+      try {
+        const res = await api.get(`/invoices/${invoiceId}`);
+        const inv = res.data;
+        if (inv.ocr_status === "ocr_done") {
+          clearInterval(pollRef.current!);
+          pollRef.current = null;
+          setStatus("done");
+          setCreatedInvoice({
+            id: inv.id,
+            invoice_number: inv.invoice_number,
+            ocr_status: inv.ocr_status,
+            grand_total: inv.grand_total || 0,
+            buyer_name: inv.buyer_name || "—",
+            invoice_date: inv.invoice_date || "—",
+          });
+          toast.success("OCR completed! Invoice data extracted successfully.");
+        } else if (inv.ocr_status === "failed") {
+          clearInterval(pollRef.current!);
+          pollRef.current = null;
+          setStatus("failed");
+          setError("OCR processing failed. Try uploading a clearer image.");
         }
+      } catch {
+        // keep polling
       }
-
-      router.push(`/vendor/${vendorId}/invoices/${res.data.id}`);
-    } catch (err: unknown) {
-      toast.error(getErrorMessage(err, "Failed to create invoice"));
-    }
-    setSubmitting(false);
+    }, 2000);
   };
 
-  const inputCls = "w-full px-3 py-2 border border-gray-300 rounded-lg text-sm text-gray-900 placeholder:text-gray-400 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none";
-  const labelCls = "block text-xs font-medium text-gray-600 mb-1";
-  const selectCls = "w-full px-3 py-2 border border-gray-300 rounded-lg text-sm text-gray-900 bg-white focus:ring-2 focus:ring-blue-500 outline-none";
+  const uploadInvoice = async () => {
+    if (!file) return;
+    setStatus("uploading");
+    setError(null);
+    try {
+      const formData = new FormData();
+      formData.append("file", file);
+      const res = await api.post(`/invoices/ocr-upload/${vendorId}`, formData, {
+        headers: { "Content-Type": "multipart/form-data" },
+      });
+      setStatus("processing");
+      toast.success("Invoice uploaded! OCR is processing...");
+      setCreatedInvoice({
+        id: res.data.invoice_id,
+        invoice_number: res.data.invoice_number,
+        ocr_status: "processing",
+        grand_total: 0,
+        buyer_name: "—",
+        invoice_date: "—",
+      });
+      pollOcrStatus(res.data.invoice_id);
+    } catch (err: unknown) {
+      setStatus("failed");
+      setError(getErrorMessage(err, "Upload failed"));
+      toast.error(getErrorMessage(err, "Upload failed"));
+    }
+  };
+
+  const resetForm = () => {
+    setFile(null);
+    setPreview(null);
+    setStatus("idle");
+    setCreatedInvoice(null);
+    setError(null);
+    if (pollRef.current) { clearInterval(pollRef.current); pollRef.current = null; }
+    if (fileInputRef.current) fileInputRef.current.value = "";
+  };
 
   return (
     <ProtectedRoute>
     <div className="min-h-screen bg-gray-50">
       <header className="bg-white border-b sticky top-0 z-50">
-        <div className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 flex justify-between items-center h-14">
+        <div className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 flex justify-between items-center h-14">
           <Link href="/" className="flex items-center gap-2">
             <div className="w-7 h-7 bg-gradient-to-br from-blue-600 to-indigo-700 rounded-lg flex items-center justify-center">
               <FileText className="w-4 h-4 text-white" />
@@ -162,248 +166,174 @@ export default function CreateInvoicePage() {
         </div>
       </header>
 
-      <div className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
-        <h1 className="text-xl font-bold text-gray-900 mb-6">Create GST Invoice</h1>
+      <div className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+        <div className="mb-6">
+          <h1 className="text-xl font-bold text-gray-900">Upload Invoice for OCR</h1>
+          <p className="text-sm text-gray-500 mt-1">Upload a photo or scan of your invoice. Our AI will automatically extract all details using OCR.</p>
+        </div>
 
-        {/* ── Invoice Details ── */}
-        <div className="bg-white rounded-xl border p-5 mb-5">
-          <h2 className="text-sm font-semibold text-gray-800 mb-4">Invoice Details</h2>
-          <div className="grid sm:grid-cols-4 gap-4">
-            <div>
-              <label className={labelCls}>Invoice Date *</label>
-              <input type="date" value={form.invoice_date} onChange={(e) => updateForm("invoice_date", e.target.value)} className={inputCls} />
-            </div>
-            <div>
-              <label className={labelCls}>Due Date *</label>
-              <input type="date" value={form.due_date} onChange={(e) => updateForm("due_date", e.target.value)} className={inputCls} />
-            </div>
-            <div>
-              <label className={labelCls}>Supply Type *</label>
-              <select value={form.supply_type} onChange={(e) => updateForm("supply_type", e.target.value)} className={selectCls}>
-                <option value="intra_state">Intra-State (CGST+SGST)</option>
-                <option value="inter_state">Inter-State (IGST)</option>
-              </select>
-            </div>
-            <div>
-              <label className={labelCls}>Place of Supply *</label>
-              <select value={form.place_of_supply} onChange={(e) => updateForm("place_of_supply", e.target.value)} className={selectCls}>
-                <option value="">Select State</option>
-                {INDIAN_STATES.map((s) => <option key={s} value={s}>{s}</option>)}
-              </select>
-            </div>
-          </div>
-          <div className="mt-3">
-            <label className="flex items-center gap-2 text-sm text-gray-700 cursor-pointer">
-              <input type="checkbox" checked={form.reverse_charge} onChange={(e) => updateForm("reverse_charge", e.target.checked)} className="rounded" />
-              Reverse Charge Applicable
-            </label>
-          </div>
-
-          {/* Payment Status */}
-          <div className="mt-4">
-            <label className={labelCls}>Payment Status *</label>
-            <div className="flex gap-3 mt-1">
-              <button
-                type="button"
-                onClick={() => updateForm("payment_status", "unpaid")}
-                className={`px-4 py-2 rounded-lg text-sm font-medium border transition-colors ${
-                  form.payment_status === "unpaid"
-                    ? "bg-red-50 border-red-300 text-red-700 ring-2 ring-red-200"
-                    : "border-gray-300 text-gray-600 hover:bg-gray-50"
-                }`}
-              >
-                Unpaid
-              </button>
-              <button
-                type="button"
-                onClick={() => updateForm("payment_status", "paid")}
-                className={`px-4 py-2 rounded-lg text-sm font-medium border transition-colors ${
-                  form.payment_status === "paid"
-                    ? "bg-green-50 border-green-300 text-green-700 ring-2 ring-green-200"
-                    : "border-gray-300 text-gray-600 hover:bg-gray-50"
-                }`}
-              >
-                Paid
-              </button>
-            </div>
-            <p className="text-[11px] text-gray-400 mt-1">Only unpaid invoices can be listed on the financing marketplace</p>
+        {/* OCR Info Banner */}
+        <div className="bg-blue-50 border border-blue-200 rounded-xl p-4 mb-6 flex items-start gap-3">
+          <AlertCircle className="w-5 h-5 text-blue-600 mt-0.5 flex-shrink-0" />
+          <div className="text-sm text-blue-800">
+            <strong>Why OCR?</strong> To prevent fraud, all invoices must be uploaded via OCR scan. Our system verifies the document,
+            extracts GST details automatically, and records it on the blockchain. Manually created invoices cannot be listed on the marketplace.
           </div>
         </div>
 
-        {/* ── Buyer Details ── */}
-        <div className="bg-white rounded-xl border p-5 mb-5">
-          <h2 className="text-sm font-semibold text-gray-800 mb-4">Buyer Details</h2>
-          <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-4">
-            <div className="sm:col-span-2 lg:col-span-1">
-              <label className={labelCls}>Buyer Name *</label>
-              <input value={form.buyer_name} onChange={(e) => updateForm("buyer_name", e.target.value)} className={inputCls} placeholder="Business/person name" />
-            </div>
-            <div>
-              <label className={labelCls}>Buyer GSTIN</label>
-              <input value={form.buyer_gstin} onChange={(e) => updateForm("buyer_gstin", e.target.value.toUpperCase())} className={inputCls} placeholder="Optional for B2C" maxLength={15} />
-            </div>
-            <div>
-              <label className={labelCls}>Phone</label>
-              <input value={form.buyer_phone} onChange={(e) => updateForm("buyer_phone", e.target.value)} className={inputCls} placeholder="Optional" />
-            </div>
-            <div>
-              <label className={labelCls}>Email</label>
-              <input type="email" value={form.buyer_email} onChange={(e) => updateForm("buyer_email", e.target.value)} className={inputCls} placeholder="client@email.com (optional)" />
-            </div>
-            <div className="sm:col-span-2 lg:col-span-3">
-              <label className={labelCls}>Address *</label>
-              <input value={form.buyer_address} onChange={(e) => updateForm("buyer_address", e.target.value)} className={inputCls} placeholder="Full address" />
-            </div>
-            <div>
-              <label className={labelCls}>City *</label>
-              <input value={form.buyer_city} onChange={(e) => updateForm("buyer_city", e.target.value)} className={inputCls} />
-            </div>
-            <div>
-              <label className={labelCls}>State *</label>
-              <select value={form.buyer_state} onChange={(e) => updateForm("buyer_state", e.target.value)} className={selectCls}>
-                <option value="">Select State</option>
-                {INDIAN_STATES.map((s) => <option key={s} value={s}>{s}</option>)}
-              </select>
-            </div>
-            <div>
-              <label className={labelCls}>Pincode *</label>
-              <input value={form.buyer_pincode} onChange={(e) => updateForm("buyer_pincode", e.target.value)} className={inputCls} maxLength={6} />
-            </div>
-          </div>
-          {form.buyer_email && (
-            <div className="mt-3">
-              <label className="flex items-center gap-2 text-sm text-gray-700 cursor-pointer">
-                <input type="checkbox" checked={sendEmail} onChange={(e) => setSendEmail(e.target.checked)} className="rounded" />
-                Send invoice to client via email after creation
-              </label>
-              <p className="text-[11px] text-gray-400 mt-1 ml-6">The invoice PDF will be emailed to {form.buyer_email}</p>
-            </div>
-          )}
-        </div>
-
-        {/* ── Line Items ── */}
-        <div className="bg-white rounded-xl border p-5 mb-5">
-          <div className="flex justify-between items-center mb-4">
-            <h2 className="text-sm font-semibold text-gray-800">Line Items</h2>
-            <button onClick={addItem} className="inline-flex items-center gap-1 text-sm text-blue-600 hover:text-blue-800 font-medium">
-              <Plus className="w-4 h-4" /> Add Item
-            </button>
-          </div>
-
-          <div className="space-y-4">
-            {items.map((item, idx) => {
-              const c = calcItem(item, form.supply_type);
-              return (
-                <div key={idx} className="border rounded-lg p-4 bg-gray-50">
-                  <div className="flex justify-between items-center mb-3">
-                    <span className="text-xs font-semibold text-gray-500">Item #{idx + 1}</span>
-                    {items.length > 1 && (
-                      <button onClick={() => removeItem(idx)} className="text-red-500 hover:text-red-700"><Trash2 className="w-4 h-4" /></button>
-                    )}
+        {/* Upload Area */}
+        {status === "idle" || status === "failed" ? (
+          <div className="bg-white rounded-2xl border border-gray-100 p-8 mb-6">
+            <div
+              onDrop={onDrop}
+              onDragOver={onDragOver}
+              onDragLeave={onDragLeave}
+              onClick={() => fileInputRef.current?.click()}
+              className={`border-2 border-dashed rounded-xl p-12 text-center cursor-pointer transition-all ${
+                dragActive
+                  ? "border-blue-500 bg-blue-50"
+                  : file
+                  ? "border-green-300 bg-green-50/50"
+                  : "border-gray-200 hover:border-blue-300 hover:bg-blue-50/30"
+              }`}
+            >
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept=".jpg,.jpeg,.png,.webp,.pdf"
+                className="hidden"
+                onChange={(e) => { if (e.target.files?.[0]) handleFile(e.target.files[0]); }}
+              />
+              {file ? (
+                <div className="space-y-3">
+                  {preview ? (
+                    <img src={preview} alt="Preview" className="max-h-48 mx-auto rounded-lg shadow-md" />
+                  ) : (
+                    <div className="w-20 h-20 mx-auto bg-red-50 rounded-xl flex items-center justify-center">
+                      <FileText className="w-10 h-10 text-red-500" />
+                    </div>
+                  )}
+                  <p className="text-sm font-semibold text-gray-900">{file.name}</p>
+                  <p className="text-xs text-gray-400">{(file.size / 1024).toFixed(0)} KB · {file.type}</p>
+                  <button onClick={(e) => { e.stopPropagation(); resetForm(); }}
+                    className="inline-flex items-center gap-1 text-xs text-red-600 hover:text-red-800 font-medium">
+                    <X className="w-3 h-3" /> Remove & choose another
+                  </button>
+                </div>
+              ) : (
+                <div className="space-y-3">
+                  <div className="w-16 h-16 mx-auto bg-gray-50 rounded-2xl flex items-center justify-center">
+                    <Upload className="w-8 h-8 text-gray-300" />
                   </div>
-                  <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-3">
-                    <div className="sm:col-span-2">
-                      <label className={labelCls}>Description *</label>
-                      <input value={item.description} onChange={(e) => updateItem(idx, "description", e.target.value)} className={inputCls} placeholder="Product / Service" />
-                    </div>
-                    <div>
-                      <label className={labelCls}>HSN/SAC Code *</label>
-                      <input value={item.hsn_sac_code} onChange={(e) => updateItem(idx, "hsn_sac_code", e.target.value)} className={inputCls} placeholder="e.g. 8471" maxLength={8} />
-                    </div>
-                    <div>
-                      <label className={labelCls}>Unit</label>
-                      <select value={item.unit} onChange={(e) => updateItem(idx, "unit", e.target.value)} className={selectCls}>
-                        {UNITS.map((u) => <option key={u} value={u}>{u}</option>)}
-                      </select>
-                    </div>
-                    <div>
-                      <label className={labelCls}>Quantity *</label>
-                      <input type="number" min={0.01} step="any" value={item.quantity} onChange={(e) => updateItem(idx, "quantity", Number(e.target.value))} className={inputCls} />
-                    </div>
-                    <div>
-                      <label className={labelCls}>Unit Price (₹) *</label>
-                      <input type="number" min={0} step="any" value={item.unit_price} onChange={(e) => updateItem(idx, "unit_price", Number(e.target.value))} className={inputCls} />
-                    </div>
-                    <div>
-                      <label className={labelCls}>Discount %</label>
-                      <input type="number" min={0} max={100} step="any" value={item.discount_percent} onChange={(e) => updateItem(idx, "discount_percent", Number(e.target.value))} className={inputCls} />
-                    </div>
-                    <div>
-                      <label className={labelCls}>GST Rate %</label>
-                      <select value={item.gst_rate} onChange={(e) => updateItem(idx, "gst_rate", Number(e.target.value))} className={selectCls}>
-                        {GST_RATES.map((r) => <option key={r} value={r}>{r}%</option>)}
-                      </select>
-                    </div>
-                  </div>
-                  {/* Calculated preview */}
-                  <div className="mt-3 flex flex-wrap gap-4 text-xs text-gray-500 border-t pt-2">
-                    <span>Taxable: <strong className="text-gray-800">₹{c.taxable.toLocaleString("en-IN")}</strong></span>
-                    {form.supply_type === "intra_state" ? (
-                      <>
-                        <span>CGST: ₹{c.cgst.toLocaleString("en-IN")}</span>
-                        <span>SGST: ₹{c.sgst.toLocaleString("en-IN")}</span>
-                      </>
-                    ) : (
-                      <span>IGST: ₹{c.igst.toLocaleString("en-IN")}</span>
-                    )}
-                    {c.cess > 0 && <span>Cess: ₹{c.cess.toLocaleString("en-IN")}</span>}
-                    <span>Total: <strong className="text-gray-900">₹{c.total.toLocaleString("en-IN")}</strong></span>
+                  <div>
+                    <p className="text-sm font-semibold text-gray-700">Drop your invoice here or click to browse</p>
+                    <p className="text-xs text-gray-400 mt-1">Supports JPEG, PNG, WebP, PDF · Max 15 MB</p>
                   </div>
                 </div>
-              );
-            })}
-          </div>
-        </div>
+              )}
+            </div>
 
-        {/* ── Summary ── */}
-        <div className="bg-white rounded-xl border p-5 mb-5">
-          <h2 className="text-sm font-semibold text-gray-800 mb-3">Invoice Summary</h2>
-          <div className="max-w-sm ml-auto space-y-1.5 text-sm">
-            <div className="flex justify-between"><span className="text-gray-500">Sub Total</span><span>₹{totals.subtotal.toLocaleString("en-IN")}</span></div>
-            {totals.discount > 0 && <div className="flex justify-between text-red-600"><span>Discount</span><span>-₹{totals.discount.toLocaleString("en-IN")}</span></div>}
-            {form.supply_type === "intra_state" ? (
-              <>
-                <div className="flex justify-between"><span className="text-gray-500">CGST</span><span>₹{totals.cgst.toLocaleString("en-IN")}</span></div>
-                <div className="flex justify-between"><span className="text-gray-500">SGST</span><span>₹{totals.sgst.toLocaleString("en-IN")}</span></div>
-              </>
-            ) : (
-              <div className="flex justify-between"><span className="text-gray-500">IGST</span><span>₹{totals.igst.toLocaleString("en-IN")}</span></div>
+            {error && (
+              <div className="mt-4 p-3 bg-red-50 border border-red-200 rounded-lg flex items-center gap-2 text-sm text-red-700">
+                <AlertCircle className="w-4 h-4 flex-shrink-0" />
+                {error}
+              </div>
             )}
-            {totals.cess > 0 && <div className="flex justify-between"><span className="text-gray-500">Cess</span><span>₹{totals.cess.toLocaleString("en-IN")}</span></div>}
-            {roundOff !== 0 && <div className="flex justify-between text-gray-400"><span>Round Off</span><span>{roundOff > 0 ? "+" : ""}₹{roundOff}</span></div>}
-            <div className="flex justify-between font-bold text-lg border-t pt-2 mt-2">
-              <span>Grand Total</span><span>₹{grandTotal.toLocaleString("en-IN")}</span>
+
+            {file && (
+              <div className="mt-6 flex justify-center">
+                <button onClick={uploadInvoice}
+                  className="inline-flex items-center gap-2 px-8 py-3 bg-blue-600 text-white rounded-xl font-semibold hover:bg-blue-700 transition-colors shadow-lg shadow-blue-200">
+                  <Upload className="w-5 h-5" /> Upload & Start OCR
+                </button>
+              </div>
+            )}
+          </div>
+        ) : null}
+
+        {/* Processing State */}
+        {(status === "uploading" || status === "processing") && (
+          <div className="bg-white rounded-2xl border border-blue-100 p-12 text-center mb-6">
+            <div className="w-20 h-20 mx-auto bg-blue-50 rounded-2xl flex items-center justify-center mb-4">
+              <Loader2 className="w-10 h-10 text-blue-600 animate-spin" />
+            </div>
+            <h3 className="text-lg font-semibold text-gray-900 mb-2">
+              {status === "uploading" ? "Uploading Invoice..." : "OCR Processing..."}
+            </h3>
+            <p className="text-sm text-gray-500 max-w-md mx-auto">
+              {status === "uploading"
+                ? "Uploading your invoice to the server..."
+                : "Our AI is reading your invoice and extracting GST details, buyer info, line items, and amounts. This usually takes 5–15 seconds."}
+            </p>
+            {/* Progress steps */}
+            <div className="mt-6 flex items-center justify-center gap-8 text-xs">
+              <div className="flex items-center gap-1.5 text-green-600">
+                <CheckCircle className="w-4 h-4" /> Uploaded
+              </div>
+              <div className={`flex items-center gap-1.5 ${status === "processing" ? "text-blue-600" : "text-gray-300"}`}>
+                <Clock className="w-4 h-4" /> OCR Running
+              </div>
+              <div className="flex items-center gap-1.5 text-gray-300">
+                <Check className="w-4 h-4" /> Complete
+              </div>
             </div>
           </div>
-        </div>
+        )}
 
-        {/* ── Notes & Terms ── */}
-        <div className="bg-white rounded-xl border p-5 mb-5 grid sm:grid-cols-2 gap-4">
-          <div>
-            <label className={labelCls}>Notes</label>
-            <textarea value={form.notes} onChange={(e) => updateForm("notes", e.target.value)} className={inputCls} rows={3} placeholder="Internal notes..." />
-          </div>
-          <div>
-            <label className={labelCls}>Terms & Conditions</label>
-            <textarea value={form.terms} onChange={(e) => updateForm("terms", e.target.value)} className={inputCls} rows={3} />
-          </div>
-        </div>
+        {/* Success State */}
+        {status === "done" && createdInvoice && (
+          <div className="bg-white rounded-2xl border border-green-100 p-8 mb-6">
+            <div className="text-center mb-6">
+              <div className="w-16 h-16 mx-auto bg-green-50 rounded-2xl flex items-center justify-center mb-3">
+                <CheckCircle className="w-8 h-8 text-green-600" />
+              </div>
+              <h3 className="text-lg font-bold text-green-800">Invoice Uploaded & OCR Complete!</h3>
+              <p className="text-sm text-gray-500 mt-1">Your invoice has been processed and is ready for review.</p>
+            </div>
 
-        {/* ── Blockchain Notice ── */}
-        <div className="bg-indigo-50 border border-indigo-200 rounded-xl p-4 mb-6 flex items-start gap-3">
-          <AlertCircle className="w-5 h-5 text-indigo-600 mt-0.5 flex-shrink-0" />
+            {/* Extracted summary */}
+            <div className="bg-green-50/50 rounded-xl border border-green-100 p-5 mb-6">
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
+                <div>
+                  <p className="text-xs text-gray-400 uppercase font-medium">Invoice #</p>
+                  <p className="font-bold text-gray-900 mt-0.5">{createdInvoice.invoice_number}</p>
+                </div>
+                <div>
+                  <p className="text-xs text-gray-400 uppercase font-medium">Buyer</p>
+                  <p className="font-semibold text-gray-900 mt-0.5">{createdInvoice.buyer_name}</p>
+                </div>
+                <div>
+                  <p className="text-xs text-gray-400 uppercase font-medium">Date</p>
+                  <p className="font-semibold text-gray-900 mt-0.5">{createdInvoice.invoice_date}</p>
+                </div>
+                <div>
+                  <p className="text-xs text-gray-400 uppercase font-medium">Total</p>
+                  <p className="font-bold text-green-700 mt-0.5">₹{createdInvoice.grand_total.toLocaleString("en-IN")}</p>
+                </div>
+              </div>
+            </div>
+
+            {/* Action buttons */}
+            <div className="flex flex-col sm:flex-row gap-3 justify-center">
+              <button onClick={() => router.push(`/vendor/${vendorId}/invoices/${createdInvoice.id}`)}
+                className="inline-flex items-center justify-center gap-2 px-6 py-3 bg-blue-600 text-white rounded-xl font-semibold hover:bg-blue-700 transition-colors">
+                <Eye className="w-5 h-5" /> View & List on Marketplace
+              </button>
+              <button onClick={resetForm}
+                className="inline-flex items-center justify-center gap-2 px-6 py-3 border border-gray-200 text-gray-700 rounded-xl font-semibold hover:bg-gray-50 transition-colors">
+                <RefreshCw className="w-5 h-5" /> Upload Another Invoice
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* Blockchain Notice */}
+        <div className="bg-indigo-50 border border-indigo-200 rounded-xl p-4 flex items-start gap-3">
+          <Image className="w-5 h-5 text-indigo-600 mt-0.5 flex-shrink-0" />
           <div className="text-sm text-indigo-800">
-            <strong>Blockchain Secured:</strong> Once created, this invoice will be hashed and recorded on the InvoX blockchain.
-            The hash ensures immutability — any tampering will be detectable. The invoice can then be listed on the financing marketplace.
+            <strong>Blockchain Secured:</strong> Once OCR extracts your invoice data, it is hashed and recorded on the InvoX blockchain.
+            This ensures immutability — any tampering will be detectable. Only OCR-verified invoices can be listed on the financing marketplace.
           </div>
-        </div>
-
-        {/* Submit */}
-        <div className="flex justify-end">
-          <button onClick={onSubmit} disabled={submitting}
-            className="inline-flex items-center gap-2 px-8 py-3 bg-green-600 text-white rounded-xl font-semibold hover:bg-green-700 disabled:opacity-60 transition-colors">
-            {submitting ? <><Loader2 className="w-5 h-5 animate-spin" /> Creating...</> : <><Check className="w-5 h-5" /> Create Invoice</>}
-          </button>
         </div>
       </div>
     </div>
