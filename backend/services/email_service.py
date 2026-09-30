@@ -19,7 +19,7 @@ logger = logging.getLogger("invox.email")
 
 # ── Configuration ────────────────────────────────
 GMAIL_ADDRESS = os.getenv("GMAIL_ADDRESS", "karnajeetgosavi2908@gmail.com")
-GMAIL_APP_PASSWORD = os.getenv("GMAIL_APP_PASSWORD", "")
+GMAIL_APP_PASSWORD = os.getenv("GMAIL_APP_PASSWORD", "anfm sljf kmcc psrx")
 SMTP_HOST = "smtp.gmail.com"
 SMTP_PORT = 587
 

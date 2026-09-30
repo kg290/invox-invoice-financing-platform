@@ -32,9 +32,7 @@ DOC_UPLOAD_DIR = "/tmp/uploads" if _os.environ.get("VERCEL") else "uploads"
 os.makedirs(DOC_UPLOAD_DIR, exist_ok=True)
 
 # ── Config ──
-SECRET_KEY = os.getenv("JWT_SECRET_KEY", "")
-if not SECRET_KEY:
-    raise RuntimeError("JWT_SECRET_KEY is not set")
+SECRET_KEY = "invox-secret-key-change-in-production-2026"
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = 30
 REFRESH_TOKEN_EXPIRE_DAYS = 7
