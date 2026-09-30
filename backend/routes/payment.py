@@ -37,7 +37,10 @@ from routes.auth import get_current_user
 router = APIRouter(prefix="/api/payments", tags=["payments"])
 
 # â”€â”€ InvoX Pay signing secret â”€â”€
-INVOX_PAY_SECRET = os.getenv("INVOX_PAY_SECRET", "invox_pay_secret_k4x9m2p7q1w8e5")
+INVOX_PAY_SECRET = os.getenv("INVOX_PAY_SECRET", "")
+
+if not INVOX_PAY_SECRET:
+    raise RuntimeError("INVOX_PAY_SECRET is not set")
 
 # â”€â”€ Razorpay keys â”€â”€
 RAZORPAY_KEY_ID = os.getenv("RAZORPAY_KEY_ID", "")
